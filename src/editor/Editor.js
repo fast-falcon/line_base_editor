@@ -1,7 +1,7 @@
 import EditorUI from '../ui.js';
 import EditorState from '../state.js';
 import { registerShortcuts } from './shortcuts.js';
-import { groupSelection } from './grouping.js';
+import { groupSelection, ungroupSelection } from './grouping.js';
 
 /**
  * High level editor controller.  The original project kept all logic
@@ -28,6 +28,11 @@ export default class Editor {
   /** Initialise editor services and register listeners. */
   init() {
     registerShortcuts(this);
+    // Wire up basic grouping buttons similar to the original
+    // implementation so the split modules still expose the
+    // expected behaviour.
+    this.ui.groupBtn?.addEventListener('click', () => this.groupSelection());
+    this.ui.ungroupBtn?.addEventListener('click', () => this.ungroupSelection());
   }
 
   /** Update current drawing tool. */
@@ -38,6 +43,11 @@ export default class Editor {
   /** Group the currently selected items. */
   groupSelection() {
     groupSelection(this.state);
+  }
+
+  /** Ungroup the currently selected groups. */
+  ungroupSelection() {
+    ungroupSelection(this.state);
   }
 }
 

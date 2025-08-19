@@ -6,6 +6,7 @@
 export function registerShortcuts(editor) {
   const shortcuts = {
     g: () => editor.groupSelection(),
+    u: () => editor.ungroupSelection(),
     s: () => editor.setTool('select'),
     m: () => editor.setTool('move')
   };
