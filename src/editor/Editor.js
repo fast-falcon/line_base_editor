@@ -47,9 +47,18 @@ export default class Editor {
     this.ui.groupBtn?.addEventListener('click', () => this.groupSelection());
     this.ui.ungroupBtn?.addEventListener('click', () => this.ungroupSelection());
 
-    // Tool buttons
+    // Shape menu toggle
+    this.ui.shapeMenuBtn?.addEventListener('click', () => {
+      const expanded = this.ui.shapeMenu?.getAttribute('aria-expanded') === 'true';
+      this.ui.shapeMenu?.setAttribute('aria-expanded', (!expanded).toString());
+    });
+
+    // Tool buttons inside the popup
     this.ui.shapePop?.querySelectorAll('button[data-tool]').forEach(btn => {
-      btn.addEventListener('click', () => this.setTool(btn.dataset.tool));
+      btn.addEventListener('click', () => {
+        this.setTool(btn.dataset.tool);
+        this.ui.shapeMenu?.setAttribute('aria-expanded', 'false');
+      });
     });
 
     // Canvas events
@@ -62,7 +71,8 @@ export default class Editor {
     this.ui.redo?.addEventListener('click', () => { redo(this.state); this.redraw(); });
     this.ui.clear?.addEventListener('click', () => { clear(this.state); this.redraw(); });
 
-    this.setTool('select');
+    // Default to line tool so drawing works out of the box
+    this.setTool('line');
   }
 
   resizeCanvas() {
@@ -78,6 +88,10 @@ export default class Editor {
   /** Update current drawing tool. */
   setTool(tool) {
     this.currentTool = tool;
+    // reflect active tool in the popup menu
+    this.ui.shapePop?.querySelectorAll('button[data-tool]').forEach(btn => {
+      btn.setAttribute('aria-pressed', btn.dataset.tool === tool);
+    });
     const map = {
       select: SelectTool,
       move: MoveTool,
