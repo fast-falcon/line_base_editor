@@ -15,3 +15,21 @@ export function groupSelection(state) {
   state.selected = new Set([groupId]);
 }
 
+/**
+ * Ungroup currently selected group items.  This mirrors the basic
+ * behaviour from the original monolithic implementation where a
+ * group element could be removed to reveal its children without
+ * any additional geometry processing.
+ */
+export function ungroupSelection(state) {
+  const groups = Array.from(state.selected || [])
+    .map(id => state.items.find(it => it.id === id))
+    .filter(it => it && it.kind === 'group');
+  if (groups.length === 0) return;
+
+  for (const group of groups) {
+    state.items = state.items.filter(it => it.id !== group.id);
+    state.selected.delete(group.id);
+  }
+}
+
