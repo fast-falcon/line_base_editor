@@ -29,7 +29,7 @@ export default class QuadraticTool {
     if (!this.drawing) return;
     this.drawing = false;
     const { offsetX, offsetY } = e;
-    this.editor.state.items.push({
+    this.editor.addItem({
       type: 'quadratic',
       x1: this.startX,
       y1: this.startY,
@@ -38,6 +38,5 @@ export default class QuadraticTool {
       strokeWidth: this.editor.ui.strokeWidth.valueAsNumber || 1,
       strokeColor: this.editor.ui.strokeColor.value
     });
-    this.editor.redraw();
   }
 }

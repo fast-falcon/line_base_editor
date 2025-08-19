@@ -30,6 +30,9 @@ export default class Editor {
     this.ui = new EditorUI();
     this.state = new EditorState();
 
+    // simple id generator for elements
+    this.idCounter = 1;
+
     // currently selected drawing tool
     this.currentTool = 'select';
     this.toolInstance = null;
@@ -47,9 +50,18 @@ export default class Editor {
     this.ui.groupBtn?.addEventListener('click', () => this.groupSelection());
     this.ui.ungroupBtn?.addEventListener('click', () => this.ungroupSelection());
 
-    // Tool buttons
+    // Shape menu toggle
+    this.ui.shapeMenuBtn?.addEventListener('click', () => {
+      const expanded = this.ui.shapeMenu?.getAttribute('aria-expanded') === 'true';
+      this.ui.shapeMenu?.setAttribute('aria-expanded', (!expanded).toString());
+    });
+
+    // Tool buttons inside the popup
     this.ui.shapePop?.querySelectorAll('button[data-tool]').forEach(btn => {
-      btn.addEventListener('click', () => this.setTool(btn.dataset.tool));
+      btn.addEventListener('click', () => {
+        this.setTool(btn.dataset.tool);
+        this.ui.shapeMenu?.setAttribute('aria-expanded', 'false');
+      });
     });
 
     // Canvas events
@@ -58,11 +70,25 @@ export default class Editor {
     window.addEventListener('mouseup', e => this.onPointerUp(e));
 
     // Action buttons
-    this.ui.undo?.addEventListener('click', () => { undo(this.state); this.redraw(); });
-    this.ui.redo?.addEventListener('click', () => { redo(this.state); this.redraw(); });
-    this.ui.clear?.addEventListener('click', () => { clear(this.state); this.redraw(); });
+    this.ui.undo?.addEventListener('click', () => {
+      undo(this.state);
+      this.updateElemList();
+      this.redraw();
+    });
+    this.ui.redo?.addEventListener('click', () => {
+      redo(this.state);
+      this.updateElemList();
+      this.redraw();
+    });
+    this.ui.clear?.addEventListener('click', () => {
+      clear(this.state);
+      this.updateElemList();
+      this.redraw();
+    });
 
-    this.setTool('select');
+    // Default to line tool so drawing works out of the box
+    this.setTool('line');
+    this.updateElemList();
   }
 
   resizeCanvas() {
@@ -78,6 +104,10 @@ export default class Editor {
   /** Update current drawing tool. */
   setTool(tool) {
     this.currentTool = tool;
+    // reflect active tool in the popup menu
+    this.ui.shapePop?.querySelectorAll('button[data-tool]').forEach(btn => {
+      btn.setAttribute('aria-pressed', btn.dataset.tool === tool);
+    });
     const map = {
       select: SelectTool,
       move: MoveTool,
@@ -124,18 +154,101 @@ export default class Editor {
           break;
       }
       ctx.stroke();
+      if (this.state.selected.has(item.id)) {
+        ctx.strokeStyle = '#9b7bff';
+        ctx.stroke();
+      }
     };
     this.state.items.forEach(drawItem);
     if (preview) drawItem(preview);
   }
 
+  addItem(item) {
+    item.id = `item-${this.idCounter++}`;
+    this.state.items.push(item);
+    this.state.future = [];
+    this.updateElemList();
+    this.redraw();
+  }
+
+  updateElemList() {
+    const list = this.ui.elemList;
+    if (!list) return;
+    list.innerHTML = '';
+    this.state.items.forEach(it => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.dataset.id = it.id;
+      row.setAttribute('aria-selected', this.state.selected.has(it.id));
+      const sw = document.createElement('div');
+      sw.className = 'sw';
+      sw.style.background = it.strokeColor;
+      const label = document.createElement('div');
+      label.textContent = it.type;
+      row.append(sw, label);
+      row.addEventListener('click', e => {
+        if (!e.shiftKey) this.state.selected.clear();
+        if (this.state.selected.has(it.id)) this.state.selected.delete(it.id);
+        else this.state.selected.add(it.id);
+        this.updateElemList();
+        this.redraw();
+      });
+      list.appendChild(row);
+    });
+  }
+
+  hitTest(x, y) {
+    const nearLine = (x1, y1, x2, y2) => {
+      const A = x - x1;
+      const B = y - y1;
+      const C = x2 - x1;
+      const D = y2 - y1;
+      const dot = A * C + B * D;
+      const lenSq = C * C + D * D;
+      let param = -1;
+      if (lenSq !== 0) param = dot / lenSq;
+      let xx, yy;
+      if (param < 0) { xx = x1; yy = y1; }
+      else if (param > 1) { xx = x2; yy = y2; }
+      else { xx = x1 + param * C; yy = y1 + param * D; }
+      const dx = x - xx;
+      const dy = y - yy;
+      return dx * dx + dy * dy <= 25; // 5px radius
+    };
+
+    for (let i = this.state.items.length - 1; i >= 0; i--) {
+      const it = this.state.items[i];
+      switch (it.type) {
+        case 'line':
+          if (nearLine(it.x1, it.y1, it.x2, it.y2)) return it;
+          break;
+        case 'rect':
+        case 'ellipse':
+          if (x >= it.x && x <= it.x + it.w && y >= it.y && y <= it.y + it.h) return it;
+          break;
+        case 'quadratic':
+          const minX = Math.min(it.x1, it.x2);
+          const maxX = Math.max(it.x1, it.x2);
+          const minY = Math.min(it.y1, it.y2);
+          const maxY = Math.max(it.y1, it.y2);
+          if (x >= minX && x <= maxX && y >= minY && y <= maxY) return it;
+          break;
+      }
+    }
+    return null;
+  }
+
   /** Group the currently selected items. */
   groupSelection() {
     groupSelection(this.state);
+    this.updateElemList();
+    this.redraw();
   }
 
   /** Ungroup the currently selected groups. */
   ungroupSelection() {
     ungroupSelection(this.state);
+    this.updateElemList();
+    this.redraw();
   }
 }

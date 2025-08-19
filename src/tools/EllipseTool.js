@@ -29,7 +29,7 @@ export default class EllipseTool {
     if (!this.drawing) return;
     this.drawing = false;
     const { offsetX, offsetY } = e;
-    this.editor.state.items.push({
+    this.editor.addItem({
       type: 'ellipse',
       x: Math.min(this.startX, offsetX),
       y: Math.min(this.startY, offsetY),
@@ -38,6 +38,5 @@ export default class EllipseTool {
       strokeWidth: this.editor.ui.strokeWidth.valueAsNumber || 1,
       strokeColor: this.editor.ui.strokeColor.value
     });
-    this.editor.redraw();
   }
 }

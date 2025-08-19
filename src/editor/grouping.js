@@ -11,7 +11,7 @@ export function groupSelection(state) {
   if (selected.length < 2) return;
 
   const groupId = `group-${Date.now()}`;
-  state.items.push({ id: groupId, kind: 'group', children: selected });
+  state.items.push({ id: groupId, type: 'group', children: selected });
   state.selected = new Set([groupId]);
 }
 
@@ -24,7 +24,7 @@ export function groupSelection(state) {
 export function ungroupSelection(state) {
   const groups = Array.from(state.selected || [])
     .map(id => state.items.find(it => it.id === id))
-    .filter(it => it && it.kind === 'group');
+    .filter(it => it && it.type === 'group');
   if (groups.length === 0) return;
 
   for (const group of groups) {
