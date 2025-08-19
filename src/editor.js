@@ -1,88 +1,20 @@
-    (() => {
+import EditorUI from './ui.js';
+import EditorState from './state.js';
+
+(() => {
         const toolbar = document.getElementById('toolbar');
         const stageWrap = document.getElementById('stageWrap');
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         const DPR = Math.max(1, window.devicePixelRatio || 1);
-        const UI = {
-            // tools
-            shapeMenu: document.getElementById('shapeMenu'),
-            shapeMenuBtn: document.getElementById('shapeMenuBtn'),
-            shapePop: document.getElementById('shapePop'),
-            // draw props
-            strokeWidth: document.getElementById('strokeWidth'),
-            strokeColor: document.getElementById('strokeColor'),
-            fillWrap: document.getElementById('fillWrap'),
-            fillColor: document.getElementById('fillColor'),
-            rotDeg: document.getElementById('rotDeg'),
-            // history / file
-            undo: document.getElementById('undo'),
-            redo: document.getElementById('redo'),
-            fileInput: document.getElementById('fileInput'),
-            saveJSON: document.getElementById('saveJSON'),
-            saveJSONMin: document.getElementById('saveJSONMin'),
-            exportPNG: document.getElementById('exportPNG'),
-            clear: document.getElementById('clear'),
-            // sidebar
-            tabElems: document.getElementById('tabElems'),
-            tabAnims: document.getElementById('tabAnims'),
-            panelElems: document.getElementById('panelElems'),
-            panelAnims: document.getElementById('panelAnims'),
-            elemList: document.getElementById('elemList'),
-            toggleAll: document.getElementById('toggleAll'),
-            deleteSel: document.getElementById('deleteSel'),
-            groupBtn: document.getElementById('groupBtn'),
-            ungroupBtn: document.getElementById('ungroupBtn'),
-            // timeline (bottom)
-            timeline: document.getElementById('timeline'),
-            ticks: document.getElementById('ticks'),
-            cursor: document.getElementById('cursor'),
-            playhead: document.getElementById('playhead'),
-            tlAddKey: document.getElementById('tlAddKey'),
-            tlPlay: document.getElementById('tlPlay'),
-            // anim panel
-            animName: document.getElementById('animName'),
-            animDur: document.getElementById('animDur'),
-            animSelect: document.getElementById('animSelect'),
-            addAnim: document.getElementById('addAnim'),
-            renameAnim: document.getElementById('renameAnim'),
-            setKey: document.getElementById('setKey'),
-            play: document.getElementById('play'),
-            pause: document.getElementById('pause'),
-            delAnim: document.getElementById('delAnim'),
-            // selection visuals
-            ghost: document.getElementById('ghost'),
-            rotHandle: document.getElementById('rotHandle'),
-            // apply
-            apply: document.getElementById('apply'),
-            help: document.getElementById('help'),
-            fillEnabled: document.getElementById('fillEnabled'),
-            fillMode: document.getElementById('fillMode'),
-        };
+        const UI = new EditorUI();
         // ========= State =========
         /** @typedef {{x:number,y:number}} Pt */
         /** @typedef {{id:string, kind:'line', p1:Pt, p2:Pt, color:string, width:number, rot?:number, visible?:boolean, name?:string}} LineItem */
         /** @typedef {{id:string, kind:'quadratic', p1:Pt, p2:Pt, cp:Pt, color:string, width:number, rot?:number, visible?:boolean, name?:string}} QuadItem */
         /** @typedef {{id:string, kind:'shape', path:Pt[], color:string, width:number, fill?:string, rot?:number, visible?:boolean, name?:string, children?:string[]}} ShapeItem */
         /** @typedef {{id:string, name:string, duration:number, keyframes:Array<{t:number, snapshot:any}>}} Anim */
-        let state = {
-            tool: 'select',
-            items: /** @type {(LineItem|QuadItem|ShapeItem)[]} */ ([]),
-            selected: /** @type {Set<string>} */ (new Set()),
-            drawing: null, // temp drawing item
-            history: [],
-            future: [],
-            animations: /** @type {Anim[]} */ ([]),
-            currentAnimId: null,
-            tl: {
-                sec: 0,
-                playing: false,
-                startTime: 0
-            },
-        };
-        // ========= DOM refs =========
-        // اضافه کردن ref جدید برای دکمه راهنما
-        UI.helpBtn = document.getElementById('helpBtn');
+        let state = new EditorState();
         // ========= کلیدهای میانبر =========
         const shortcuts = {
             'h': () => UI.helpBtn.click(), // نمایش/پنهان راهنما
