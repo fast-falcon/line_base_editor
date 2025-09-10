@@ -3,6 +3,10 @@ import { emit } from '../events.js';
 import { pushHistory } from '../utils/history.js';
 import { rndId, snapIfNeeded } from '../utils/helpers.js';
 
+const rotDeg = document.getElementById('rotDeg');
+const rotHandle = document.getElementById('rotHandle');
+const ghost = document.getElementById('ghost');
+
 let dragging = null;
 
 export function onMouseMove(e) {
@@ -15,6 +19,26 @@ export function onMouseMove(e) {
       pts[dragging.keyIndex] = mp;
       setItemPoints(item, pts);
       emit('draw');
+      updateGhost();
+    } else if (dragging.type === 'move') {
+      const dx = mp.x - dragging.start.x;
+      const dy = mp.y - dragging.start.y;
+      dragging.start = mp;
+      for (const it of selectionItems()) {
+        const pts = itemPoints(it).map(p => ({ x: p.x + dx, y: p.y + dy }));
+        setItemPoints(it, pts);
+      }
+      emit('draw');
+      updateGhost();
+    } else if (dragging.type === 'rotate') {
+      const box = selectionBBox();
+      if (!box) return;
+      const ang = Math.atan2(mp.y - box.cy, mp.x - box.cx) * 180 / Math.PI - dragging.base;
+      const sel = selectionItems();
+      for (const it of sel) it.rot = (dragging.rot0.get(it.id) || 0) + ang;
+      rotDeg.value = Math.round(sel[0]?.rot || 0);
+      emit('draw');
+      updateGhost();
     }
     return;
   }
@@ -75,20 +99,29 @@ export function onMouseDown(e) {
       pushHistory();
       return;
     }
+    const box = selectionBBox();
+    if (box && mp.x >= box.x && mp.x <= box.x + box.w && mp.y >= box.y && mp.y <= box.y + box.h) {
+      dragging = { type: 'move', start: mp };
+      pushHistory();
+      return;
+    }
     const hitId = hitTestItem(mp);
     if (hitId) {
       if (!e.shiftKey) state.selected.clear();
       state.selected.add(hitId);
       emit('draw');
+      updateGhost();
     } else {
       if (!e.shiftKey) state.selected.clear();
       emit('draw');
+      updateGhost();
     }
   }
 }
 
 export function onMouseUp() {
   dragging = null;
+  rotHandle.style.cursor = 'grab';
 }
 
 function mousePos(e) {
@@ -159,6 +192,56 @@ function pointInPolygon(p, poly) {
   }
   return inside;
 }
+
+function selectionItems() {
+  return state.items.filter(it => state.selected.has(it.id));
+}
+
+function selectionBBox() {
+  const sel = selectionItems();
+  if (!sel.length) return null;
+  let xs = [], ys = [];
+  sel.forEach(it => itemPoints(it).forEach(p => { xs.push(p.x); ys.push(p.y); }));
+  const x1 = Math.min(...xs), y1 = Math.min(...ys), x2 = Math.max(...xs), y2 = Math.max(...ys);
+  return { x: x1, y: y1, w: x2 - x1, h: y2 - y1, cx: (x1 + x2) / 2, cy: (y1 + y2) / 2 };
+}
+
+export function updateGhost() {
+  const box = selectionBBox();
+  if (!box) {
+    ghost.classList.add('hide');
+    rotHandle.classList.add('hide');
+    return;
+  }
+  ghost.classList.remove('hide');
+  rotHandle.classList.remove('hide');
+  ghost.style.left = box.x + 'px';
+  ghost.style.top = box.y + 'px';
+  ghost.style.width = Math.max(0, box.w) + 'px';
+  ghost.style.height = Math.max(0, box.h) + 'px';
+  rotHandle.style.left = (box.cx - 8) + 'px';
+  rotHandle.style.top = (box.y - 26) + 'px';
+  rotDeg.value = Math.round(selectionItems()[0]?.rot || 0);
+}
+
+rotHandle.addEventListener('mousedown', e => {
+  const box = selectionBBox();
+  if (!box) return;
+  const mp = mousePos(e);
+  const base = Math.atan2(mp.y - box.cy, mp.x - box.cx) * 180 / Math.PI;
+  const rot0 = new Map();
+  selectionItems().forEach(it => rot0.set(it.id, it.rot || 0));
+  dragging = { type: 'rotate', base, rot0 };
+  rotHandle.style.cursor = 'grabbing';
+  pushHistory();
+});
+
+rotDeg.addEventListener('input', () => {
+  const deg = +rotDeg.value || 0;
+  for (const it of selectionItems()) it.rot = deg;
+  emit('draw');
+  updateGhost();
+});
 
 function commitDrawing() {
   if (!state.drawing) return;
