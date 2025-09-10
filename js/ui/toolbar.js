@@ -48,13 +48,17 @@ export function initToolbar() {
     </div>
   `;
 
+  const menu = document.getElementById('shapeMenu');
+
   // رخدادها
   toolbar.addEventListener('click', e => {
     const btn = e.target.closest('[data-tool]');
-    if (btn) emit('tool:change', btn.dataset.tool);
+    if (btn) {
+      emit('tool:change', btn.dataset.tool);
+      menu.setAttribute('aria-expanded', 'false');
+    }
   });
   document.getElementById('shapeMenuBtn').addEventListener('click', () => {
-    const menu = document.getElementById('shapeMenu');
     const open = menu.getAttribute('aria-expanded') === 'true';
     menu.setAttribute('aria-expanded', String(!open));
   });
