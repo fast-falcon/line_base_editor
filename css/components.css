@@ -15,6 +15,13 @@
 .btn.primary { background: linear-gradient(180deg, #2a3470, #23295a); border-color: #3a4278; }
 .btn.danger { background: linear-gradient(180deg, #6a2830, #4c1c22); border-color: #9c323d; }
 
+.iconbtn {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+}
+
 .shape-pop {
   background: var(--panel);
   border: 1px solid #2b315b;
@@ -22,14 +29,16 @@
   box-shadow: 0 12px 40px rgba(0, 0, 0, .35);
 }
 
-.iconbtn {
-  color: #e8ecff;
-  background: #242a4d;
-  border: 1px solid #39468c;
-  border-radius: 10px;
-}
-
 .iconbtn:hover { background: #2b315b; }
+
+.icon {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 
 .seg {
   border: 1px solid #2b315b;
