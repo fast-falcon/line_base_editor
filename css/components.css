@@ -14,3 +14,25 @@
 .btn:hover { transform: translateY(-1px); }
 .btn.primary { background: linear-gradient(180deg, #2a3470, #23295a); border-color: #3a4278; }
 .btn.danger { background: linear-gradient(180deg, #6a2830, #4c1c22); border-color: #9c323d; }
+
+.iconbtn {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  color: #e8ecff;
+  background: #242a4d;
+  border: 1px solid #39468c;
+  border-radius: 10px;
+}
+.iconbtn:hover { background: #2b315b; }
+
+.icon {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
