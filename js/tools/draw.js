@@ -15,11 +15,10 @@ export function renderItem(ctx, item, showHandles = false) {
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   ctx.strokeStyle = item.color; ctx.lineWidth = item.width;
   if (item.rot) {
-    const cx = item.kind === 'line' ? (item.p1.x + item.p2.x) / 2 : item.kind === 'quadratic' ? (item.p1.x + item.p2.x) / 2 : item.path.reduce((s, p) => s + p.x, 0) / item.path.length;
-    const cy = item.kind === 'line' ? (item.p1.y + item.p2.y) / 2 : item.kind === 'quadratic' ? (item.p1.y + item.p2.y) / 2 : item.path.reduce((s, p) => s + p.y, 0) / item.path.length;
-    ctx.translate(cx, cy);
+    const cen = itemCenter(item);
+    ctx.translate(cen.x, cen.y);
     ctx.rotate(item.rot * Math.PI / 180);
-    ctx.translate(-cx, -cy);
+    ctx.translate(-cen.x, -cen.y);
   }
   if (item.kind === 'line') {
     ctx.beginPath(); ctx.moveTo(item.p1.x, item.p1.y); ctx.lineTo(item.p2.x, item.p2.y); ctx.stroke();
@@ -46,4 +45,13 @@ function drawHandles(ctx, pts) {
     ctx.fill(); ctx.stroke();
   }
   ctx.restore();
+}
+
+function itemCenter(it) {
+  const pts = it.kind === 'line' ? [it.p1, it.p2]
+    : it.kind === 'quadratic' ? [it.p1, it.cp, it.p2]
+    : it.path;
+  const xs = pts.map(p => p.x);
+  const ys = pts.map(p => p.y);
+  return { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 };
 }
