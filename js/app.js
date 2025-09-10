@@ -91,6 +91,10 @@ function main() {
       state.items = []; state.selected.clear(); emit('draw'); emit('refreshList');
     }
   });
+  document.getElementById('helpBtn').addEventListener('click', () => {
+    document.getElementById('help').classList.toggle('hide');
+  });
+
   document.getElementById('groupBtn').addEventListener('click', groupSelection);
   document.getElementById('ungroupBtn').addEventListener('click', ungroupSelection);
   document.getElementById('fileInput').addEventListener('change', async e => {
