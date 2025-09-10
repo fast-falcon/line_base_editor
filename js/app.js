@@ -49,6 +49,7 @@ function main() {
       state.items = []; state.selected.clear(); emit('draw'); emit('refreshList');
     }
   });
+  document.getElementById('deleteSel').addEventListener('click', deleteSelection);
   document.getElementById('fileInput').addEventListener('change', async e => {
     const f = e.target.files?.[0];
     if (!f) return;
