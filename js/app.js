@@ -2,9 +2,9 @@ import { initToolbar } from './ui/toolbar.js';
 import { initSidebar } from './ui/sidebar.js';
 import { initCanvas } from './ui/canvas.js';
 import { initTimeline } from './ui/timeline.js';
-import { on } from './events.js';
+import { on, emit } from './events.js';
 import { state } from './state.js';
-import { pushHistory } from './utils/history.js';
+import { pushHistory, undo, redo } from './utils/history.js';
 import { exportJSON, importJSON } from './utils/file.js';
 window.keys = { ctrl: false, shift: false };
 window.addEventListener('keydown', e => {
@@ -21,16 +21,46 @@ function main() {
   initCanvas();
   initTimeline();
 
-  // میان‌برها
+  const shortcuts = {
+    'h': () => document.getElementById('helpBtn').click(),
+    's': () => emit('tool:change', 'select'),
+    'm': () => emit('tool:change', 'move'),
+    'l': () => emit('tool:change', 'line'),
+    'c': () => emit('tool:change', 'quadratic'),
+    'r': () => emit('tool:change', 'rect'),
+    'e': () => emit('tool:change', 'ellipse'),
+    'g': () => emit('group'),
+    'u': () => emit('ungroup'),
+    'f2': () => renameSelected(),
+    'delete': () => deleteSelection(),
+    'escape': () => { state.drawing = null; emit('draw'); },
+    'enter': () => commitDrawing()
+  };
+
   window.addEventListener('keydown', e => {
-    if (e.target.tagName === 'INPUT') return;
-    if (e.key === 'Escape') { state.drawing = null; emit('draw'); }
-    if (e.key === 'Enter') { commitDrawing(); }
-    if (e.key === 'Delete') { deleteSelection(); }
-    if (e.ctrlKey && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); pushHistory(); undo(); emit('draw'); emit('refreshList'); }
-    if (e.ctrlKey && e.key.toLowerCase() === 'z' && e.shiftKey) { e.preventDefault(); pushHistory(); redo(); emit('draw'); emit('refreshList'); }
-    if (e.ctrlKey && e.key.toLowerCase() === 's') { e.preventDefault(); downloadBlob(JSON.stringify(exportJSON()), 'drawing.linepack.json'); }
-    if (e.ctrlKey && e.key.toLowerCase() === 'o') { e.preventDefault(); document.getElementById('fileInput').click(); }
+    const tag = e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (e.ctrlKey && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+      e.preventDefault(); pushHistory(); undo(); emit('draw'); emit('refreshList');
+      return;
+    }
+    if (e.ctrlKey && e.key.toLowerCase() === 'z' && e.shiftKey) {
+      e.preventDefault(); pushHistory(); redo(); emit('draw'); emit('refreshList');
+      return;
+    }
+    if (e.ctrlKey && e.key.toLowerCase() === 's') {
+      e.preventDefault(); downloadBlob(JSON.stringify(exportJSON()), 'drawing.linepack.json');
+      return;
+    }
+    if (e.ctrlKey && e.key.toLowerCase() === 'o') {
+      e.preventDefault(); document.getElementById('fileInput').click();
+      return;
+    }
+    const key = e.key.toLowerCase();
+    if (shortcuts[key]) {
+      e.preventDefault();
+      shortcuts[key]();
+    }
   });
 
   // دکمه‌های اصلی
@@ -59,6 +89,12 @@ function main() {
     } catch (err) { alert('فایل معتبر نیست: ' + err.message); }
     e.target.value = '';
   });
+
+  document.getElementById('helpBtn').addEventListener('click', () => {
+    document.getElementById('help').classList.toggle('hide');
+  });
+  document.getElementById('groupBtn').addEventListener('click', () => emit('group'));
+  document.getElementById('ungroupBtn').addEventListener('click', () => emit('ungroup'));
 }
 
 function deleteSelection() {
@@ -67,6 +103,19 @@ function deleteSelection() {
   state.items = state.items.filter(it => !state.selected.has(it.id));
   state.selected.clear();
   emit('draw'); emit('refreshList');
+}
+
+function renameSelected() {
+  const ids = [...state.selected];
+  if (ids.length !== 1) return;
+  const item = state.items.find(it => it.id === ids[0]);
+  if (!item) return;
+  const name = prompt('نام جدید', item.name || '');
+  if (name !== null) {
+    item.name = name.trim() || item.name;
+    emit('draw');
+    emit('refreshList');
+  }
 }
 
 function commitDrawing() {
