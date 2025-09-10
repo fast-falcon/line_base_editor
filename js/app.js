@@ -49,6 +49,9 @@ function main() {
       state.items = []; state.selected.clear(); emit('draw'); emit('refreshList');
     }
   });
+  document.getElementById('helpBtn').addEventListener('click', () => {
+    document.getElementById('help').classList.toggle('hide');
+  });
   document.getElementById('fileInput').addEventListener('change', async e => {
     const f = e.target.files?.[0];
     if (!f) return;
