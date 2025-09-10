@@ -14,3 +14,22 @@
 .btn:hover { transform: translateY(-1px); }
 .btn.primary { background: linear-gradient(180deg, #2a3470, #23295a); border-color: #3a4278; }
 .btn.danger { background: linear-gradient(180deg, #6a2830, #4c1c22); border-color: #9c323d; }
+
+.color {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  border: 1px solid #2b315b;
+  background: var(--panel);
+}
+
+.color input[type=color] {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+}
