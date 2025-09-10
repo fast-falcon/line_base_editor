@@ -2,9 +2,10 @@ import { initToolbar } from './ui/toolbar.js';
 import { initSidebar } from './ui/sidebar.js';
 import { initCanvas } from './ui/canvas.js';
 import { initTimeline } from './ui/timeline.js';
-import { on } from './events.js';
+import { on, emit } from './events.js';
 import { state } from './state.js';
-import { pushHistory } from './utils/history.js';
+import { pushHistory, undo, redo } from './utils/history.js';
+import { groupSelection, ungroupSelection } from './tools/group.js';
 import { exportJSON, importJSON } from './utils/file.js';
 window.keys = { ctrl: false, shift: false };
 window.addEventListener('keydown', e => {
@@ -29,6 +30,8 @@ function main() {
     if (e.key === 'Delete') { deleteSelection(); }
     if (e.ctrlKey && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); pushHistory(); undo(); emit('draw'); emit('refreshList'); }
     if (e.ctrlKey && e.key.toLowerCase() === 'z' && e.shiftKey) { e.preventDefault(); pushHistory(); redo(); emit('draw'); emit('refreshList'); }
+    if (e.ctrlKey && e.key.toLowerCase() === 'g' && !e.shiftKey) { e.preventDefault(); groupSelection(); }
+    if (e.ctrlKey && e.key.toLowerCase() === 'g' && e.shiftKey) { e.preventDefault(); ungroupSelection(); }
     if (e.ctrlKey && e.key.toLowerCase() === 's') { e.preventDefault(); downloadBlob(JSON.stringify(exportJSON()), 'drawing.linepack.json'); }
     if (e.ctrlKey && e.key.toLowerCase() === 'o') { e.preventDefault(); document.getElementById('fileInput').click(); }
   });
@@ -49,6 +52,8 @@ function main() {
       state.items = []; state.selected.clear(); emit('draw'); emit('refreshList');
     }
   });
+  document.getElementById('groupBtn').addEventListener('click', groupSelection);
+  document.getElementById('ungroupBtn').addEventListener('click', ungroupSelection);
   document.getElementById('fileInput').addEventListener('change', async e => {
     const f = e.target.files?.[0];
     if (!f) return;
