@@ -17,3 +17,67 @@
 .badge { padding: 2px 8px; border-radius: 999px; background: #24305a; border: 1px solid #39468c; color: #cfe0ff; font-size: 11px; }
 .muted { color: var(--muted); }
 .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace; font-size: 11px; background: #0b0e1a; border: 1px solid #2b315b; padding: 2px 6px; border-radius: 6px; color: #cdd5ff; }
+
+
+.iconbtn {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+}
+
+.shape-pop {
+  background: var(--panel);
+  border: 1px solid #2b315b;
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .35);
+}
+
+.iconbtn:hover { background: #2b315b; }
+
+.icon {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+
+.seg {
+  border: 1px solid #2b315b;
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.color {
+  background: var(--panel);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  border: 1px solid #2b315b;
+}
+
+.color input[type=color] {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+}
+
+.help-btn {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 50%;
+}
+
+.help-btn:hover {
+  background: var(--panel-2);
+  color: var(--accent);
+}

@@ -9,17 +9,37 @@
   <link rel="stylesheet" href="css/components.css" />
 </head>
 <body>
-  <div id="toolbar"></div>
+  <div id="toolbar" class="toolbar"></div>
   <div class="content">
-    <aside id="sidebar"></aside>
-    <main id="stage">
+    <aside id="sidebar" class="sidebar"></aside>
+    <main id="stage" class="stage">
       <canvas id="canvas"></canvas>
       <div id="ghost" class="ghost hide"></div>
       <div id="rotHandle" class="rot-h hide"></div>
-      <div id="help" class="help hide"></div>
+      <div id="help" class="help hide">
+        <strong>راهنما و کلیدهای میانبر</strong>
+        <ul>
+          <li><span class="kbd">H</span>: نمایش/مخفی راهنما</li>
+          <li><span class="kbd">S</span>: ابزار انتخاب</li>
+          <li><span class="kbd">M</span>: ابزار جابجایی</li>
+          <li><span class="kbd">L</span>: ابزار خط</li>
+          <li><span class="kbd">C</span>: ابزار منحنی</li>
+          <li><span class="kbd">R</span>: ابزار مستطیل</li>
+          <li><span class="kbd">E</span>: ابزار بیضی</li>
+          <li><span class="kbd">G</span>: گروه‌بندی المان‌ها</li>
+          <li><span class="kbd">U</span>: باز کردن گروه</li>
+          <li><span class="kbd">F2</span>: تغییر نام المان/گروه</li>
+          <li><span class="kbd">Delete</span>: حذف انتخاب‌شده‌ها</li>
+          <li><span class="kbd">Ctrl+S</span>: ذخیره پروژه</li>
+          <li><span class="kbd">Ctrl+O</span>: باز کردن پروژه</li>
+          <li><span class="kbd">Escape</span>: لغو عملیات جاری</li>
+          <li><span class="kbd">Enter</span>: اعمال رسم جاری</li>
+        </ul>
+        <div>فرمت ذخیره: <span class="badge">LinePack+Anim v2</span></div>
+      </div>
     </main>
   </div>
-  <div id="timeline"></div>
+  <div id="timeline" class="timeline"></div>
 
   <!-- SVG symbols -->
   <svg style="position:absolute;width:0;height:0" aria-hidden="true">
