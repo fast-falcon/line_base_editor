@@ -91,6 +91,7 @@ function main() {
       state.items = []; state.selected.clear(); emit('draw'); emit('refreshList');
     }
   });
+  document.getElementById('deleteSel').addEventListener('click', deleteSelection);
   document.getElementById('helpBtn').addEventListener('click', () => {
     document.getElementById('help').classList.toggle('hide');
   });

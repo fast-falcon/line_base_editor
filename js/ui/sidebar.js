@@ -39,6 +39,13 @@ export function initSidebar() {
       </div>
     </div>
   `;
+  // دکمه‌های المان‌ها
+  document.getElementById('toggleAll').addEventListener('click', () => {
+    const anyHidden = state.items.some(it => it.visible === false);
+    state.items.forEach(it => { it.visible = anyHidden; });
+    refreshElemList();
+    emit('draw');
+  });
 
   // تب‌ها
   sidebar.addEventListener('click', e => {
