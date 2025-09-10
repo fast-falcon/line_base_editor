@@ -1,4 +1,5 @@
-import { emit } from '../events.js';
+import { emit, on } from '../events.js';
+import { state } from '../state.js';
 
 export function initToolbar() {
   const toolbar = document.getElementById('toolbar');
@@ -56,8 +57,7 @@ export function initToolbar() {
     </div>
     <div class="center">
       <label>ضخامت <input id="strokeWidth" class="btn" type="number" min="1" max="24" value="3" style="width:70px"></label>
-      <span class="color"><label>رنگ خط</label><input id="strokeColor" type="color" value="#ffffff"/></span>
-      <span class="color"><label>پرشدن</label>
+      <span id="fillWrap" class="color"><label>پرشدن</label>
         <select id="fillMode" class="btn">
           <option value="hollow">توخالی</option>
           <option value="solid" selected>توپر</option>
@@ -65,6 +65,7 @@ export function initToolbar() {
         </select>
         <input id="fillColor" type="color" value="#66ccff"/>
       </span>
+      <span class="color"><label>رنگ خط</label><input id="strokeColor" type="color" value="#ffffff"/></span>
       <button id="undo" class="btn" title="واگرد (Ctrl+Z)">واگرد</button>
       <button id="redo" class="btn" title="از نو (Ctrl+Shift+Z)">از نو</button>
       <button id="apply" class="btn" title="ثبت (Enter)">اعمال</button>
@@ -83,6 +84,12 @@ export function initToolbar() {
     </div>
   `;
 
+  const fillWrap = document.getElementById('fillWrap');
+  const updateFillWrap = tool => {
+    const isShape = ['rect', 'ellipse'].includes(tool);
+    fillWrap.style.opacity = isShape ? 1 : 0.4;
+    fillWrap.style.pointerEvents = isShape ? 'auto' : 'none';
+  };
   const menu = document.getElementById('shapeMenu');
 
   // رخدادها
@@ -93,8 +100,16 @@ export function initToolbar() {
       menu.setAttribute('aria-expanded', 'false');
     }
   });
+
+  on('tool:change', e => {
+    state.tool = e.detail;
+    updateFillWrap(e.detail);
+  });
+
   document.getElementById('shapeMenuBtn').addEventListener('click', () => {
     const open = menu.getAttribute('aria-expanded') === 'true';
     menu.setAttribute('aria-expanded', String(!open));
   });
+
+  updateFillWrap(state.tool);
 }
