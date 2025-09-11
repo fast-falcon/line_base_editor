@@ -30,6 +30,14 @@ export function initTimeline() {
   document.getElementById('tlPlay').addEventListener('click', togglePlay);
 }
 
+export function currentAnim() {
+  return state.animations.find(a => a.id === state.currentAnimId) || null;
+}
+
+export function snapshotState() {
+  return JSON.parse(JSON.stringify(state.items));
+}
+
 export function rebuildTicks() {
   const dur = +document.getElementById('animDur')?.value || 5;
   const ticks = document.getElementById('ticks');
@@ -69,16 +77,16 @@ function xToSec(x) {
 }
 
 function hasKeyAt(sec) {
-  const a = state.animations.find(a => a.id === state.currentAnimId);
+  const a = currentAnim();
   if (!a) return false;
   return a.keyframes.some(k => k.t === sec);
 }
 
-function putKeyframe() {
-  const a = state.animations.find(a => a.id === state.currentAnimId);
+export function putKeyframe() {
+  const a = currentAnim();
   if (!a) return;
   const t = state.tl.sec;
-  const snap = JSON.parse(JSON.stringify(state.items));
+  const snap = snapshotState();
   const idx = a.keyframes.findIndex(k => k.t === t);
   if (idx >= 0) a.keyframes[idx].snapshot = snap;
   else a.keyframes.push({ t, snapshot: snap });
@@ -87,7 +95,7 @@ function putKeyframe() {
 }
 
 function togglePlay() {
-  const a = state.animations.find(a => a.id === state.currentAnimId);
+  const a = currentAnim();
   if (!a || !a.keyframes.length) return;
   state.tl.playing = !state.tl.playing;
   if (state.tl.playing) {
@@ -96,9 +104,9 @@ function togglePlay() {
   }
 }
 
-function stepPlay(now) {
+export function stepPlay(now) {
   if (!state.tl.playing) return;
-  const a = state.animations.find(a => a.id === state.currentAnimId);
+  const a = currentAnim();
   if (!a) return;
   const dur = (a.duration || 5) * 1000;
   const tms = (now - state.tl.startTime) % dur;

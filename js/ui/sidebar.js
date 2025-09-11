@@ -1,6 +1,8 @@
 import { state } from '../state.js';
 import { emit } from '../events.js';
 import { pushHistory } from '../utils/history.js';
+import { rndId } from '../utils/helpers.js';
+import { rebuildTicks, placeCursor, putKeyframe, stepPlay, currentAnim } from './timeline.js';
 
 export function initSidebar() {
   const sidebar = document.getElementById('sidebar');
@@ -58,7 +60,59 @@ export function initSidebar() {
     }
   });
 
+  // دکمه‌های انیمیشن‌ها
+  const animName = document.getElementById('animName');
+  const animSelect = document.getElementById('animSelect');
+  const animDur = document.getElementById('animDur');
+  document.getElementById('addAnim').addEventListener('click', () => {
+    const name = animName.value.trim() || ('کلیپ ' + (state.animations.length + 1));
+    const id = rndId('anim');
+    state.animations.push({ id, name, duration: +animDur.value || 5, keyframes: [] });
+    state.currentAnimId = id;
+    refreshAnimSelect();
+    placeCursor();
+  });
+  document.getElementById('renameAnim').addEventListener('click', () => {
+    const a = currentAnim();
+    if (!a) return;
+    a.name = animName.value.trim() || a.name;
+    refreshAnimSelect();
+  });
+  document.getElementById('delAnim').addEventListener('click', () => {
+    if (!state.currentAnimId) return;
+    state.animations = state.animations.filter(a => a.id !== state.currentAnimId);
+    state.currentAnimId = state.animations[0]?.id || null;
+    refreshAnimSelect();
+    placeCursor();
+  });
+  animSelect.addEventListener('change', () => {
+    state.currentAnimId = animSelect.value;
+    const a = currentAnim();
+    if (a) {
+      animName.value = a.name;
+      animDur.value = a.duration;
+      rebuildTicks();
+      placeCursor();
+    }
+  });
+  animDur.addEventListener('change', () => {
+    const a = currentAnim();
+    if (a) a.duration = +animDur.value || 5;
+    rebuildTicks();
+    placeCursor();
+  });
+  document.getElementById('setKey').addEventListener('click', putKeyframe);
+  document.getElementById('play').addEventListener('click', () => {
+    const a = currentAnim();
+    if (!a || !a.keyframes.length) return;
+    state.tl.playing = true;
+    state.tl.startTime = performance.now() - state.tl.sec * 1000;
+    requestAnimationFrame(stepPlay);
+  });
+  document.getElementById('pause').addEventListener('click', () => { state.tl.playing = false; });
+
   refreshElemList();
+  refreshAnimSelect();
 }
 
 export function refreshElemList() {
@@ -85,4 +139,16 @@ export function refreshElemList() {
     row.querySelectorAll('svg')[1].addEventListener('click', e => { e.stopPropagation(); pushHistory(); state.items = state.items.filter(x => x.id !== it.id); state.selected.delete(it.id); refreshElemList(); emit('draw'); });
     list.appendChild(row);
   });
+}
+
+export function refreshAnimSelect() {
+  const sel = document.getElementById('animSelect');
+  sel.innerHTML = '';
+  state.animations.forEach(a => {
+    const opt = document.createElement('option');
+    opt.value = a.id;
+    opt.textContent = a.name;
+    sel.appendChild(opt);
+  });
+  if (state.currentAnimId) sel.value = state.currentAnimId;
 }
