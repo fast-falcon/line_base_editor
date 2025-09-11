@@ -83,6 +83,15 @@ function main() {
       e.preventDefault();
       shortcuts[key]();
     }
+    if (e.target.tagName === 'INPUT') return;
+    if (e.key === 'Escape') { state.drawing = null; emit('draw'); }
+    if (e.key === 'Enter') { commitDrawing(); }
+    if (e.ctrlKey && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); pushHistory(); undo(); emit('draw'); emit('refreshList'); }
+    if (e.ctrlKey && e.key.toLowerCase() === 'z' && e.shiftKey) { e.preventDefault(); pushHistory(); redo(); emit('draw'); emit('refreshList'); }
+    if (e.ctrlKey && e.key.toLowerCase() === 'g' && !e.shiftKey) { e.preventDefault(); groupSelection(); }
+    if (e.ctrlKey && e.key.toLowerCase() === 'g' && e.shiftKey) { e.preventDefault(); ungroupSelection(); }
+    if (e.ctrlKey && e.key.toLowerCase() === 's') { e.preventDefault(); downloadBlob(JSON.stringify(exportJSON()), 'drawing.linepack.json'); }
+
   });
 
   // دکمه‌های اصلی
