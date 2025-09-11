@@ -8,6 +8,7 @@ import { pushHistory, undo, redo } from './utils/history.js';
 
 import { groupSelection, ungroupSelection } from './tools/group.js';
 import { exportJSON, importJSON } from './utils/file.js';
+import { initManip } from './tools/manip.js';
 window.keys = { ctrl: false, shift: false };
 window.addEventListener('keydown', e => {
   if (e.key === 'Control') window.keys.ctrl = true;
@@ -19,6 +20,22 @@ window.addEventListener('keyup', e => {
 });
 function main() {
   initToolbar();
+  // ثبت رویدادهای دکمه‌های اصلی پس از ایجاد نوار ابزار
+  document.getElementById('undo').addEventListener('click', () => {
+    pushHistory();
+    undo();
+    emit('draw');
+    emit('refreshList');
+  });
+  document.getElementById('redo').addEventListener('click', () => {
+    pushHistory();
+    redo();
+    emit('draw');
+    emit('refreshList');
+  });
+  document.getElementById('apply').addEventListener('click', commitDrawing);
+
+  initManip();
   initSidebar();
   initCanvas();
   initTimeline();
@@ -38,6 +55,9 @@ function main() {
     'escape': () => { state.drawing = null; emit('draw'); },
     'enter': () => commitDrawing()
   };
+
+  on('group', groupSelection);
+  on('ungroup', ungroupSelection);
 
   window.addEventListener('keydown', e => {
     const tag = e.target.tagName;
@@ -71,7 +91,7 @@ function main() {
     if (e.ctrlKey && e.key.toLowerCase() === 'g' && !e.shiftKey) { e.preventDefault(); groupSelection(); }
     if (e.ctrlKey && e.key.toLowerCase() === 'g' && e.shiftKey) { e.preventDefault(); ungroupSelection(); }
     if (e.ctrlKey && e.key.toLowerCase() === 's') { e.preventDefault(); downloadBlob(JSON.stringify(exportJSON()), 'drawing.linepack.json'); }
-    if (e.ctrlKey && e.key.toLowerCase() === 'o') { e.preventDefault(); document.getElementById('fileInput').click(); }
+
   });
 
   // دکمه‌های اصلی
@@ -95,8 +115,8 @@ function main() {
     document.getElementById('help').classList.toggle('hide');
   });
 
-  document.getElementById('groupBtn').addEventListener('click', groupSelection);
-  document.getElementById('ungroupBtn').addEventListener('click', ungroupSelection);
+  document.getElementById('groupBtn').addEventListener('click', () => emit('group'));
+  document.getElementById('ungroupBtn').addEventListener('click', () => emit('ungroup'));
   document.getElementById('fileInput').addEventListener('change', async e => {
     const f = e.target.files?.[0];
     if (!f) return;
@@ -108,11 +128,6 @@ function main() {
     e.target.value = '';
   });
 
-  document.getElementById('helpBtn').addEventListener('click', () => {
-    document.getElementById('help').classList.toggle('hide');
-  });
-  document.getElementById('groupBtn').addEventListener('click', () => emit('group'));
-  document.getElementById('ungroupBtn').addEventListener('click', () => emit('ungroup'));
 }
 
 function deleteSelection() {

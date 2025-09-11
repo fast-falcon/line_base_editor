@@ -1,5 +1,5 @@
 import { state } from '../state.js';
-import { emit } from '../events.js';
+import { emit, on } from '../events.js';
 import { pushHistory } from '../utils/history.js';
 import { rndId } from '../utils/helpers.js';
 import { rebuildTicks, placeCursor, putKeyframe, stepPlay, currentAnim } from './timeline.js';
@@ -110,6 +110,7 @@ export function initSidebar() {
     requestAnimationFrame(stepPlay);
   });
   document.getElementById('pause').addEventListener('click', () => { state.tl.playing = false; });
+  on('refreshList', refreshElemList);
 
   refreshElemList();
   refreshAnimSelect();
