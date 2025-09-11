@@ -85,8 +85,14 @@ export function initToolbar() {
   `;
 
   const fillWrap = document.getElementById('fillWrap');
-  const updateFillWrap = tool => {
-    const isShape = ['rect', 'ellipse'].includes(tool);
+  const fillMode = document.getElementById('fillMode');
+  const fillColor = document.getElementById('fillColor');
+  const updateFillWrap = () => {
+    const toolShape = ['rect', 'ellipse'].includes(state.tool);
+    const selShape = [...state.selected].some(id =>
+      state.items.find(it => it.id === id)?.kind === 'shape'
+    );
+    const isShape = toolShape || selShape;
     fillWrap.style.opacity = isShape ? 1 : 0.4;
     fillWrap.style.pointerEvents = isShape ? 'auto' : 'none';
   };
@@ -103,7 +109,11 @@ export function initToolbar() {
 
   on('tool:change', e => {
     state.tool = e.detail;
-    updateFillWrap(e.detail);
+    updateFillWrap();
+  });
+
+  on('selection:change', () => {
+    updateFillWrap();
   });
 
   document.getElementById('shapeMenuBtn').addEventListener('click', () => {
@@ -111,5 +121,34 @@ export function initToolbar() {
     menu.setAttribute('aria-expanded', String(!open));
   });
 
-  updateFillWrap(state.tool);
+  fillMode.addEventListener('change', () => {
+    const mode = fillMode.value;
+    const color = mode === 'hollow' ? null : fillColor.value;
+    const width = mode === 'fill' ? 0 : +document.getElementById('strokeWidth').value;
+    let changed = false;
+    state.selected.forEach(id => {
+      const it = state.items.find(x => x.id === id);
+      if (it && it.kind === 'shape') {
+        it.fill = color;
+        it.width = width;
+        changed = true;
+      }
+    });
+    if (changed) emit('draw');
+  });
+
+  fillColor.addEventListener('input', () => {
+    const color = fillColor.value;
+    let changed = false;
+    state.selected.forEach(id => {
+      const it = state.items.find(x => x.id === id);
+      if (it && it.kind === 'shape' && it.fill !== null) {
+        it.fill = color;
+        changed = true;
+      }
+    });
+    if (changed) emit('draw');
+  });
+
+  updateFillWrap();
 }

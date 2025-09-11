@@ -142,6 +142,7 @@ export function onMouseDown(e) {
     if (hitId && !state.selected.has(hitId)) {
       if (!e.shiftKey) state.selected.clear();
       state.selected.add(hitId);
+      emit('selection:change');
       emit('draw');
       updateGhost();
     }
@@ -155,6 +156,7 @@ export function onMouseDown(e) {
     const hit = hitTestHandle(mp);
     if (hit) {
       state.selected.clear(); state.selected.add(hit.id);
+      emit('selection:change');
       dragging = { type: 'handle', id: hit.id, keyIndex: hit.keyIndex };
       pushHistory();
       return;
@@ -169,10 +171,12 @@ export function onMouseDown(e) {
     if (hitId) {
       if (!e.shiftKey) state.selected.clear();
       state.selected.add(hitId);
+      emit('selection:change');
       emit('draw');
       updateGhost();
     } else {
       if (!e.shiftKey) state.selected.clear();
+      emit('selection:change');
       emit('draw');
       updateGhost();
     }
