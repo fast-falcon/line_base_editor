@@ -69,6 +69,30 @@ export function onMouseMove(e) {
     else if (state.drawing.kind === 'quadratic') {
       if (state.drawing.stage === 1) state.drawing.p2 = mp;
       else if (state.drawing.stage === 2) state.drawing.cp = mp;
+    } else if (state.drawing.kind === 'shape') {
+      if (state.drawing._isEllipse) {
+        const c = state.drawing._center;
+        const rx = Math.abs(mp.x - c.x);
+        const ry = Math.abs(mp.y - c.y);
+        state.drawing._edge = mp;
+        const segs = 32;
+        const pts = [];
+        for (let i = 0; i < segs; i++) {
+          const ang = i / segs * Math.PI * 2;
+          pts.push({ x: c.x + rx * Math.cos(ang), y: c.y + ry * Math.sin(ang) });
+        }
+        state.drawing.path = pts;
+      } else if (state.drawing._isRect) {
+        const p0 = state.drawing.path[0];
+        const x1 = p0.x, y1 = p0.y;
+        const x2 = mp.x, y2 = mp.y;
+        state.drawing.path = [
+          { x: x1, y: y1 },
+          { x: x2, y: y1 },
+          { x: x2, y: y2 },
+          { x: x1, y: y2 }
+        ];
+      }
     }
     emit('draw');
   }
