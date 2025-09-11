@@ -188,13 +188,15 @@ function createRow(it, isGroup = false) {
     ev.stopPropagation();
     pushHistory();
     if (it.kind === 'group') {
-      state.items = state.items.filter(item => item.id !== it.id && !(it.children || []).includes(item.id));
+      const childIds = it.children || [];
+      state.items = state.items.filter(item => item.id !== it.id && !childIds.includes(item.id));
+      childIds.forEach(id => state.selected.delete(id));
     } else {
       state.items = state.items.filter(x => x.id !== it.id);
     }
     state.selected.delete(it.id);
-    refreshElemList();
     emit('draw');
+    emit('refreshList');
   });
 
   return row;
