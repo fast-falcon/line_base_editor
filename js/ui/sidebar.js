@@ -119,27 +119,104 @@ export function initSidebar() {
 export function refreshElemList() {
   const list = document.getElementById('elemList');
   list.innerHTML = '';
-  state.items.forEach(it => {
-    const row = document.createElement('div');
-    row.className = 'row';
-    row.dataset.id = it.id;
-    row.setAttribute('aria-selected', state.selected.has(it.id));
-    row.innerHTML = `
-      <div class="sw" style="background:${it.kind === 'shape' ? (it.fill || it.color) : it.color}"></div>
-      <div class="title">${it.name || (it.kind === 'line' ? 'خط' : it.kind === 'quadratic' ? 'منحنی' : 'شکل')}</div>
-      <svg class="icon" viewBox="0 0 24 24"><use href="#${it.visible === false ? 'ico-eyeoff' : 'ico-eye'}"></use></svg>
-      <svg class="icon" viewBox="0 0 24 24"><use href="#ico-trash"></use></svg>
-    `;
-    row.addEventListener('click', e => {
-      const add = e.shiftKey;
-      if (add) state.selected.add(it.id); else { state.selected.clear(); state.selected.add(it.id); }
-      refreshElemList();
-      emit('draw');
-    });
-    row.querySelector('svg').addEventListener('click', e => { e.stopPropagation(); it.visible = !it.visible; refreshElemList(); emit('draw'); });
-    row.querySelectorAll('svg')[1].addEventListener('click', e => { e.stopPropagation(); pushHistory(); state.items = state.items.filter(x => x.id !== it.id); state.selected.delete(it.id); refreshElemList(); emit('draw'); });
+
+  const allGroups = state.items.filter(it => it.kind === 'group');
+  const childSet = new Set(allGroups.flatMap(g => g.children || []));
+  const topGroups = allGroups.filter(g => !childSet.has(g.id));
+
+  for (const group of topGroups) {
+    const groupRow = createRow(group, true);
+    list.appendChild(groupRow);
+    const childrenContainer = document.createElement('div');
+    childrenContainer.className = 'group-children';
+    appendChildren(childrenContainer, group);
+    list.appendChild(childrenContainer);
+  }
+
+  const ungrouped = state.items.filter(it => !childSet.has(it.id) && it.kind !== 'group');
+  for (const item of ungrouped) {
+    const row = createRow(item);
     list.appendChild(row);
+  }
+}
+
+function createRow(it, isGroup = false) {
+  const row = document.createElement('div');
+  row.className = `row${isGroup ? ' group-row' : ''}`;
+  row.dataset.id = it.id;
+  row.setAttribute('aria-selected', state.selected.has(it.id));
+
+  const sw = document.createElement('div');
+  sw.className = 'sw';
+  sw.style.background = it.kind === 'shape' ? (it.fill || it.color) : it.color;
+  row.appendChild(sw);
+
+  const title = document.createElement('div');
+  title.className = 'title';
+  title.textContent = niceName(it);
+  row.appendChild(title);
+
+  const eye = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  eye.setAttribute('viewBox', '0 0 24 24');
+  eye.classList.add('icon');
+  eye.innerHTML = `<use href="#${it.visible === false ? 'ico-eyeoff' : 'ico-eye'}"></use>`;
+  eye.style.cursor = 'pointer';
+  row.appendChild(eye);
+
+  const del = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  del.setAttribute('viewBox', '0 0 24 24');
+  del.classList.add('icon');
+  del.innerHTML = '<use href="#ico-trash"></use>';
+  del.style.cursor = 'pointer';
+  row.appendChild(del);
+
+  row.addEventListener('click', ev => {
+    const add = ev.shiftKey;
+    if (add) state.selected.add(it.id); else { state.selected.clear(); state.selected.add(it.id); }
+    refreshElemList();
+    emit('draw');
   });
+
+  eye.addEventListener('click', ev => {
+    ev.stopPropagation();
+    it.visible = it.visible === false ? true : false;
+    refreshElemList();
+    emit('draw');
+  });
+
+  del.addEventListener('click', ev => {
+    ev.stopPropagation();
+    pushHistory();
+    if (it.kind === 'group') {
+      state.items = state.items.filter(item => item.id !== it.id && !(it.children || []).includes(item.id));
+    } else {
+      state.items = state.items.filter(x => x.id !== it.id);
+    }
+    state.selected.delete(it.id);
+    refreshElemList();
+    emit('draw');
+  });
+
+  return row;
+}
+
+function appendChildren(container, parent) {
+  for (const childId of (parent.children || [])) {
+    const child = state.items.find(it => it.id === childId);
+    if (!child) continue;
+    const row = createRow(child, child.kind === 'group');
+    container.appendChild(row);
+    if (child.kind === 'group') {
+      const sub = document.createElement('div');
+      sub.className = 'group-children';
+      appendChildren(sub, child);
+      container.appendChild(sub);
+    }
+  }
+}
+
+function niceName(it) {
+  return it.name || (it.kind === 'line' ? 'خط' : it.kind === 'quadratic' ? 'منحنی' : 'شکل');
 }
 
 export function refreshAnimSelect() {
