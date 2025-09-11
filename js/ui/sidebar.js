@@ -180,6 +180,17 @@ function createRow(it, isGroup = false) {
   eye.addEventListener('click', ev => {
     ev.stopPropagation();
     it.visible = it.visible === false ? true : false;
+    if (it.kind === 'group') {
+      const syncVisible = grp => {
+        (grp.children || []).forEach(childId => {
+          const child = state.items.find(item => item.id === childId);
+          if (!child) return;
+          child.visible = grp.visible;
+          if (child.kind === 'group') syncVisible(child);
+        });
+      };
+      syncVisible(it);
+    }
     refreshElemList();
     emit('draw');
   });
