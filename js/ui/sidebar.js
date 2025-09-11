@@ -14,8 +14,8 @@ export function initSidebar() {
     <div id="panelElems" class="panel">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
         <div style="display:flex;gap:6px">
-          <button id="toggleAll" class="btn">نمایش</button>
-          <button id="deleteSel" class="btn danger">حذف</button>
+          <button id="toggleAll" class="btn" title="نمایش/مخفی همه">نمایش</button>
+          <button id="deleteSel" class="btn danger" title="حذف انتخاب‌شده‌ها (Delete)">حذف</button>
         </div>
         <small class="muted">برای چند انتخاب <span class="kbd">Shift</span> را نگه دار</small>
       </div>
