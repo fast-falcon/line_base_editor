@@ -3,11 +3,33 @@ import { emit } from '../events.js';
 import { pushHistory } from '../utils/history.js';
 import { rndId, snapIfNeeded } from '../utils/helpers.js';
 
-const rotDeg = document.getElementById('rotDeg');
-const rotHandle = document.getElementById('rotHandle');
-const ghost = document.getElementById('ghost');
-
+let rotDeg, rotHandle, ghost;
 let dragging = null;
+
+export function initManip() {
+  rotDeg = document.getElementById('rotDeg');
+  rotHandle = document.getElementById('rotHandle');
+  ghost = document.getElementById('ghost');
+
+  rotHandle.addEventListener('mousedown', e => {
+    const box = selectionBBox();
+    if (!box) return;
+    const mp = mousePos(e);
+    const base = Math.atan2(mp.y - box.cy, mp.x - box.cx) * 180 / Math.PI;
+    const rot0 = new Map();
+    selectionItems().forEach(it => rot0.set(it.id, it.rot || 0));
+    dragging = { type: 'rotate', base, rot0 };
+    rotHandle.style.cursor = 'grabbing';
+    pushHistory();
+  });
+
+  rotDeg.addEventListener('input', () => {
+    const deg = +rotDeg.value || 0;
+    for (const it of selectionItems()) it.rot = deg;
+    emit('draw');
+    updateGhost();
+  });
+}
 
 export function onMouseMove(e) {
   const mp = snapIfNeeded(mousePos(e));
@@ -223,25 +245,6 @@ export function updateGhost() {
   rotHandle.style.top = (box.y - 26) + 'px';
   rotDeg.value = Math.round(selectionItems()[0]?.rot || 0);
 }
-
-rotHandle.addEventListener('mousedown', e => {
-  const box = selectionBBox();
-  if (!box) return;
-  const mp = mousePos(e);
-  const base = Math.atan2(mp.y - box.cy, mp.x - box.cx) * 180 / Math.PI;
-  const rot0 = new Map();
-  selectionItems().forEach(it => rot0.set(it.id, it.rot || 0));
-  dragging = { type: 'rotate', base, rot0 };
-  rotHandle.style.cursor = 'grabbing';
-  pushHistory();
-});
-
-rotDeg.addEventListener('input', () => {
-  const deg = +rotDeg.value || 0;
-  for (const it of selectionItems()) it.rot = deg;
-  emit('draw');
-  updateGhost();
-});
 
 function commitDrawing() {
   if (!state.drawing) return;
