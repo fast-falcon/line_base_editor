@@ -113,6 +113,20 @@ export function onMouseDown(e) {
     emit('draw');
     return;
   }
+  if (state.tool === 'move') {
+    const hitId = hitTestItem(mp);
+    if (hitId && !state.selected.has(hitId)) {
+      if (!e.shiftKey) state.selected.clear();
+      state.selected.add(hitId);
+      emit('draw');
+      updateGhost();
+    }
+    if (state.selected.size) {
+      dragging = { type: 'move', start: mp };
+      pushHistory();
+    }
+    return;
+  }
   if (state.tool === 'select') {
     const hit = hitTestHandle(mp);
     if (hit) {
@@ -153,9 +167,9 @@ function mousePos(e) {
 
 function hitTestHandle(pt) {
   const r = 7;
-  for (let i = state.items.length - 1; i >= 0; i--) {
-    const it = state.items[i];
-    if (!state.selected.has(it.id)) continue;
+  const sel = selectionItems();
+  for (let i = sel.length - 1; i >= 0; i--) {
+    const it = sel[i];
     const pts = itemPoints(it);
     for (let k = pts.length - 1; k >= 0; k--) {
       const p = pts[k];
@@ -216,7 +230,16 @@ function pointInPolygon(p, poly) {
 }
 
 function selectionItems() {
-  return state.items.filter(it => state.selected.has(it.id));
+  const out = [];
+  const seen = new Set();
+  function add(id) {
+    const it = state.items.find(x => x.id === id);
+    if (!it) return;
+    if (it.kind === 'group') (it.children || []).forEach(add);
+    else if (!seen.has(it.id)) { seen.add(it.id); out.push(it); }
+  }
+  state.selected.forEach(add);
+  return out;
 }
 
 function selectionBBox() {
