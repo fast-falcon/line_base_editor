@@ -39,6 +39,9 @@ function main() {
     'enter': () => commitDrawing()
   };
 
+  on('group', groupSelection);
+  on('ungroup', ungroupSelection);
+
   window.addEventListener('keydown', e => {
     const tag = e.target.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
@@ -63,16 +66,6 @@ function main() {
       e.preventDefault();
       shortcuts[key]();
     }
-    if (e.target.tagName === 'INPUT') return;
-    if (e.key === 'Escape') { state.drawing = null; emit('draw'); }
-    if (e.key === 'Enter') { commitDrawing(); }
-    if (e.key === 'Delete') { deleteSelection(); }
-    if (e.ctrlKey && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); pushHistory(); undo(); emit('draw'); emit('refreshList'); }
-    if (e.ctrlKey && e.key.toLowerCase() === 'z' && e.shiftKey) { e.preventDefault(); pushHistory(); redo(); emit('draw'); emit('refreshList'); }
-    if (e.ctrlKey && e.key.toLowerCase() === 'g' && !e.shiftKey) { e.preventDefault(); groupSelection(); }
-    if (e.ctrlKey && e.key.toLowerCase() === 'g' && e.shiftKey) { e.preventDefault(); ungroupSelection(); }
-    if (e.ctrlKey && e.key.toLowerCase() === 's') { e.preventDefault(); downloadBlob(JSON.stringify(exportJSON()), 'drawing.linepack.json'); }
-    if (e.ctrlKey && e.key.toLowerCase() === 'o') { e.preventDefault(); document.getElementById('fileInput').click(); }
   });
 
   // دکمه‌های اصلی
@@ -96,8 +89,8 @@ function main() {
     document.getElementById('help').classList.toggle('hide');
   });
 
-  document.getElementById('groupBtn').addEventListener('click', groupSelection);
-  document.getElementById('ungroupBtn').addEventListener('click', ungroupSelection);
+  document.getElementById('groupBtn').addEventListener('click', () => emit('group'));
+  document.getElementById('ungroupBtn').addEventListener('click', () => emit('ungroup'));
   document.getElementById('fileInput').addEventListener('change', async e => {
     const f = e.target.files?.[0];
     if (!f) return;
@@ -109,11 +102,6 @@ function main() {
     e.target.value = '';
   });
 
-  document.getElementById('helpBtn').addEventListener('click', () => {
-    document.getElementById('help').classList.toggle('hide');
-  });
-  document.getElementById('groupBtn').addEventListener('click', () => emit('group'));
-  document.getElementById('ungroupBtn').addEventListener('click', () => emit('ungroup'));
 }
 
 function deleteSelection() {
