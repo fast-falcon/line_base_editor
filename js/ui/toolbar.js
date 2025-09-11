@@ -1,5 +1,6 @@
 import { emit, on } from '../events.js';
 import { state } from '../state.js';
+import { undo, redo } from '../utils/history.js';
 
 export function initToolbar() {
   const toolbar = document.getElementById('toolbar');
@@ -87,6 +88,8 @@ export function initToolbar() {
   const fillWrap = document.getElementById('fillWrap');
   const fillMode = document.getElementById('fillMode');
   const fillColor = document.getElementById('fillColor');
+  const undoBtn = document.getElementById('undo');
+  const redoBtn = document.getElementById('redo');
   const updateFillWrap = () => {
     const toolShape = ['rect', 'ellipse'].includes(state.tool);
     const selShape = [...state.selected].some(id =>
@@ -151,4 +154,13 @@ export function initToolbar() {
   });
 
   updateFillWrap();
+
+  const updateHistoryBtns = () => {
+    undoBtn.disabled = state.history.length === 0;
+    redoBtn.disabled = state.future.length === 0;
+  };
+  undoBtn.addEventListener('click', () => undo());
+  redoBtn.addEventListener('click', () => redo());
+  on('history:update', updateHistoryBtns);
+  updateHistoryBtns();
 }

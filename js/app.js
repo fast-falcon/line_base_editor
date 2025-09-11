@@ -20,19 +20,6 @@ window.addEventListener('keyup', e => {
 });
 function main() {
   initToolbar();
-  // ثبت رویدادهای دکمه‌های اصلی پس از ایجاد نوار ابزار
-  document.getElementById('undo').addEventListener('click', () => {
-    pushHistory();
-    undo();
-    emit('draw');
-    emit('refreshList');
-  });
-  document.getElementById('redo').addEventListener('click', () => {
-    pushHistory();
-    redo();
-    emit('draw');
-    emit('refreshList');
-  });
   document.getElementById('apply').addEventListener('click', commitDrawing);
 
   initManip();
@@ -62,20 +49,19 @@ function main() {
   window.addEventListener('keydown', e => {
     const tag = e.target.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-    if (e.ctrlKey && e.key.toLowerCase() === 'z' && !e.shiftKey) {
-      e.preventDefault(); pushHistory(); undo(); emit('draw'); emit('refreshList');
-      return;
-    }
-    if (e.ctrlKey && e.key.toLowerCase() === 'z' && e.shiftKey) {
-      e.preventDefault(); pushHistory(); redo(); emit('draw'); emit('refreshList');
+    if (e.ctrlKey && e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      if (e.shiftKey) redo(); else undo();
       return;
     }
     if (e.ctrlKey && e.key.toLowerCase() === 's') {
-      e.preventDefault(); downloadBlob(JSON.stringify(exportJSON()), 'drawing.linepack.json');
+      e.preventDefault();
+      downloadBlob(JSON.stringify(exportJSON()), 'drawing.linepack.json');
       return;
     }
     if (e.ctrlKey && e.key.toLowerCase() === 'o') {
-      e.preventDefault(); document.getElementById('fileInput').click();
+      e.preventDefault();
+      document.getElementById('fileInput').click();
       return;
     }
     const key = e.key.toLowerCase();
@@ -83,15 +69,10 @@ function main() {
       e.preventDefault();
       shortcuts[key]();
     }
-    if (e.target.tagName === 'INPUT') return;
     if (e.key === 'Escape') { state.drawing = null; emit('draw'); }
     if (e.key === 'Enter') { commitDrawing(); }
-    if (e.ctrlKey && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); pushHistory(); undo(); emit('draw'); emit('refreshList'); }
-    if (e.ctrlKey && e.key.toLowerCase() === 'z' && e.shiftKey) { e.preventDefault(); pushHistory(); redo(); emit('draw'); emit('refreshList'); }
     if (e.ctrlKey && e.key.toLowerCase() === 'g' && !e.shiftKey) { e.preventDefault(); groupSelection(); }
     if (e.ctrlKey && e.key.toLowerCase() === 'g' && e.shiftKey) { e.preventDefault(); ungroupSelection(); }
-    if (e.ctrlKey && e.key.toLowerCase() === 's') { e.preventDefault(); downloadBlob(JSON.stringify(exportJSON()), 'drawing.linepack.json'); }
-
   });
 
   // دکمه‌های اصلی
