@@ -144,7 +144,12 @@ function tweenItem(a, b, t) {
   if (a.kind === 'shape' && b.kind === 'shape') {
     const n = Math.min(a.path.length, b.path.length);
     o.path = [];
-    for (let i = 0; i < n; i++) o.path.push(lpt(a.path[i], b.path[i], t));
+    for (let i = 0; i < n; i++) {
+      const sa = a.path[i], sb = b.path[i];
+      const seg = { type: sa.type || sb.type, p: lpt(sa.p, sb.p, t) };
+      if (sa.cp && sb.cp) seg.cp = lpt(sa.cp, sb.cp, t);
+      o.path.push(seg);
+    }
     o.fill = t < 0.5 ? a.fill : b.fill;
   }
   return o;

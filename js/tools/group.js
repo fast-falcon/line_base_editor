@@ -57,20 +57,39 @@ export function groupSelection() {
     return dx * dx + dy * dy;
   }
   const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+  const lerp = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
 
   function flattenQuadratic(p1, cp, p2, eps, maxDepth = 12) {
     const out = [];
-    (function rec(a, c, b, depth) {
+    (function rec(a, c, b, t0, t1, depth) {
       if (depth >= maxDepth || flatness2(a, c, b) <= eps * eps) {
-        if (!out.length) out.push(a);
-        out.push(b);
+        if (!out.length) out.push({ x: a.x, y: a.y, t: t0 });
+        out.push({ x: b.x, y: b.y, t: t1 });
         return;
       }
-      const a_c = mid(a, c), c_b = mid(c, b), m = mid(a_c, c_b);
-      rec(a, a_c, m, depth + 1);
-      rec(m, c_b, b, depth + 1);
-    })(p1, cp, p2, 0);
+      const a_c = mid(a, c), c_b = mid(c, b), m = mid(a_c, c_b), tm = (t0 + t1) / 2;
+      rec(a, a_c, m, t0, tm, depth + 1);
+      rec(m, c_b, b, tm, t1, depth + 1);
+    })(p1, cp, p2, 0, 1, 0);
     return out;
+  }
+
+  function splitQuadratic(p1, cp, p2, t) {
+    const p1_cp = lerp(p1, cp, t);
+    const cp_p2 = lerp(cp, p2, t);
+    const m = lerp(p1_cp, cp_p2, t);
+    return [
+      { p1, cp: p1_cp, p2: m },
+      { p1: m, cp: cp_p2, p2 }
+    ];
+  }
+
+  function subQuadratic(p1, cp, p2, t0, t1) {
+    if (t0 <= 0 && t1 >= 1) return { p1, cp, p2 };
+    const [, right] = splitQuadratic(p1, cp, p2, t0);
+    const localT = (t1 - t0) / (1 - t0);
+    const [seg] = splitQuadratic(right.p1, right.cp, right.p2, localT);
+    return seg;
   }
 
   const sqr = x => x * x;
@@ -132,7 +151,8 @@ export function groupSelection() {
     if (it.kind === 'line') {
       const [p1, p2] = getLineEnds(it);
       if (p1 && p2) {
-        const a = toPx(p1), b = toPx(p2);
+        const a = { ...toPx(p1), t: 0 };
+        const b = { ...toPx(p2), t: 1 };
         flatPts[i] = [a, b];
         const len = Math.hypot(b.x - a.x, b.y - a.y);
         if (len > 1e-3) { totalLen += len; pieceCnt++; }
@@ -161,15 +181,15 @@ export function groupSelection() {
   const EPS_TU = Math.min(0.15, Math.max(0.02, MERGE_EPS / (avgLen + 1e-6)));
 
   // ---------- 1) Base segments ----------
-  const base = [];      // {a,b,len,prim}
-  function pushBase(a, b, prim) {
+  const base = [];      // {a,b,len,prim,t0,t1}
+  function pushBase(a, b, prim, t0, t1) {
     const len = Math.hypot(b.x - a.x, b.y - a.y);
-    if (len > 1e-3) base.push({ a, b, len, prim });
+    if (len > 1e-3) base.push({ a, b, len, prim, t0, t1 });
   }
   for (let i = 0; i < segObjs.length; i++) {
     const pts = flatPts[i];
     if (!pts || pts.length < 2) continue;
-    for (let k = 1; k < pts.length; k++) pushBase(pts[k - 1], pts[k], i);
+    for (let k = 1; k < pts.length; k++) pushBase(pts[k - 1], pts[k], i, pts[k - 1].t, pts[k].t);
   }
   if (!base.length) return makePlainGroup(leafIds);
 
@@ -218,11 +238,14 @@ export function groupSelection() {
   const micro = [];
   for (let i = 0; i < base.length; i++) {
     const A = base[i].a, B = base[i].b, prim = base[i].prim, ts = uniqSort(cuts[i]);
+    const bt0 = base[i].t0, bt1 = base[i].t1;
     for (let k = 0; k < ts.length - 1; k++) {
       const t1 = ts[k], t2 = ts[k + 1];
       const P = { x: A.x + (B.x - A.x) * t1, y: A.y + (B.y - A.y) * t1 };
       const Q = { x: A.x + (B.x - A.x) * t2, y: A.y + (B.y - A.y) * t2 };
-      if (Math.hypot(Q.x - P.x, Q.y - P.y) > EDGE_MIN) micro.push({ a: P, b: Q, prim });
+      const tp1 = bt0 + (bt1 - bt0) * t1;
+      const tp2 = bt0 + (bt1 - bt0) * t2;
+      if (Math.hypot(Q.x - P.x, Q.y - P.y) > EDGE_MIN) micro.push({ a: P, b: Q, prim, t0: tp1, t1: tp2 });
     }
   }
   if (!micro.length) return makePlainGroup(leafIds);
@@ -243,8 +266,9 @@ export function groupSelection() {
     const ia = pts.indexOf(A), ib = pts.indexOf(B);
     const key = ia < ib ? ia + '_' + ib : ib + '_' + ia;
     if (!edgeOwner.has(key)) {
+      const ori = ia < ib ? 0 : 1;
       E.push([ia, ib]);
-      edgeOwner.set(key, e.prim);
+      edgeOwner.set(key, { prim: e.prim, t0: e.t0, t1: e.t1, ori });
     }
     if (!edgesAtV.has(ia)) edgesAtV.set(ia, new Set());
     edgesAtV.get(ia).add(e.prim);
@@ -295,7 +319,11 @@ export function groupSelection() {
   // ---------- 4.5) Boundary simplification ----------
   const ANG_EPS = CONFIG.ANG_EPS;
   function ownerOf(u, v) {
-    const key = u < v ? u + '_' + v : v + '_' + u; return edgeOwner.get(key);
+    const key = u < v ? u + '_' + v : v + '_' + u;
+    const info = edgeOwner.get(key);
+    if (!info) return { prim: null, t0: 0, t1: 1 };
+    const forward = (info.ori === 0 && u < v) || (info.ori === 1 && u > v);
+    return forward ? { prim: info.prim, t0: info.t0, t1: info.t1 } : { prim: info.prim, t0: info.t1, t1: info.t0 };
   }
 
   const faces = facesIdx.map(idx => {
@@ -306,8 +334,8 @@ export function groupSelection() {
       const a = path[(i - 1 + path.length) % path.length];
       const b = path[i];
       const c = path[(i + 1) % path.length];
-      const oa = ownerOf(idx[(i - 1 + idx.length) % idx.length], idx[i]);
-      const ob = ownerOf(idx[i], idx[(i + 1) % idx.length]);
+      const oa = ownerOf(idx[(i - 1 + idx.length) % idx.length], idx[i]).prim;
+      const ob = ownerOf(idx[i], idx[(i + 1) % idx.length]).prim;
       const ang = Math.abs(normAng(angleOf(a, b) - angleOf(b, c)));
       if (ang > ANG_EPS || oa !== ob) simple.push(b);
     }
@@ -358,11 +386,28 @@ export function groupSelection() {
   const made = [];
   const mode = getFillMode();
   for (const f of finalFaces) {
-    const pathOut = f.path.map(p => fromPx(p, srcNorm));
+    const segs = [];
+    const idx = f.idx;
+    segs.push({ p: fromPx(f.path[0], srcNorm) });
+    for (let i = 0; i < idx.length; i++) {
+      const u = idx[i];
+      const v = idx[(i + 1) % idx.length];
+      const info = ownerOf(u, v);
+      const primObj = segObjs[info.prim];
+      if (!primObj) continue;
+      if (primObj.kind === 'line') {
+        const endPt = fromPx(f.path[(i + 1) % idx.length], srcNorm);
+        segs.push({ type: 'line', p: endPt });
+      } else {
+        const [p1, cp, p2] = getQuadEnds(primObj);
+        const sub = subQuadratic(toPx(p1), toPx(cp), toPx(p2), info.t0, info.t1);
+        segs.push({ type: 'quadratic', cp: fromPx(sub.cp, srcNorm), p: fromPx(sub.p2, srcNorm) });
+      }
+    }
     const shape = {
       id: rndId('shape'),
       kind: 'shape',
-      path: pathOut,
+      path: segs,
       color: getStrokeColor(),
       width: mode === 'fill' ? 0 : getStrokeWidth(),
       fill: mode === 'hollow' ? null : getFillColor(),
