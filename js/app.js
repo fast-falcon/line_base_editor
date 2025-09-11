@@ -20,6 +20,21 @@ window.addEventListener('keyup', e => {
 });
 function main() {
   initToolbar();
+  // ثبت رویدادهای دکمه‌های اصلی پس از ایجاد نوار ابزار
+  document.getElementById('undo').addEventListener('click', () => {
+    pushHistory();
+    undo();
+    emit('draw');
+    emit('refreshList');
+  });
+  document.getElementById('redo').addEventListener('click', () => {
+    pushHistory();
+    redo();
+    emit('draw');
+    emit('refreshList');
+  });
+  document.getElementById('apply').addEventListener('click', commitDrawing);
+
   initManip();
   initSidebar();
   initCanvas();
