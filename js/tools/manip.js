@@ -97,7 +97,7 @@ export function onMouseDown(e) {
   }
   if (state.tool === 'rect') {
     if (!state.drawing) {
-      state.drawing = { id: rndId('r'), kind: 'shape', path: [mp, mp, mp, mp], color: getStrokeColor(), width: getFillMode() === 'fill' ? 0 : getStrokeWidth(), fill: getFillMode() === 'hollow' ? null : getFillColor(), _isRect: true };
+      state.drawing = { id: rndId('r'), kind: 'shape', path: [{ p: mp }, { type: 'line', p: mp }, { type: 'line', p: mp }, { type: 'line', p: mp }], color: getStrokeColor(), width: getFillMode() === 'fill' ? 0 : getStrokeWidth(), fill: getFillMode() === 'hollow' ? null : getFillColor(), _isRect: true };
     } else {
       commitDrawing();
     }
@@ -106,7 +106,7 @@ export function onMouseDown(e) {
   }
   if (state.tool === 'ellipse') {
     if (!state.drawing) {
-      state.drawing = { id: rndId('e'), kind: 'shape', path: [mp], color: getStrokeColor(), width: getFillMode() === 'fill' ? 0 : getStrokeWidth(), fill: getFillMode() === 'hollow' ? null : getFillColor(), _center: mp, _edge: mp, _isEllipse: true };
+      state.drawing = { id: rndId('e'), kind: 'shape', path: [{ p: mp }], color: getStrokeColor(), width: getFillMode() === 'fill' ? 0 : getStrokeWidth(), fill: getFillMode() === 'hollow' ? null : getFillColor(), _center: mp, _edge: mp, _isEllipse: true };
     } else {
       commitDrawing();
     }
@@ -191,7 +191,7 @@ function hitTestItem(pt) {
 function pointNearItem(p, it) {
   if (it.kind === 'line') return pointLineDist(p, it.p1, it.p2) < Math.max(6, it.width + 4);
   if (it.kind === 'quadratic') return pointQuadNear(p, it.p1, it.cp, it.p2) < Math.max(6, it.width + 4);
-  if (it.kind === 'shape') return pointInPolygon(p, it.path);
+  if (it.kind === 'shape') return pointInPolygon(p, it.path.map(s => s.p));
 }
 
 function pointLineDist(p, a, b) {
@@ -288,12 +288,31 @@ function getFillMode() { return document.getElementById('fillMode').value; }
 function itemPoints(it) {
   if (it.kind === 'line') return [it.p1, it.p2];
   if (it.kind === 'quadratic') return [it.p1, it.cp, it.p2];
-  if (it.kind === 'shape') return it.path;
+  if (it.kind === 'shape') {
+    const pts = [it.path[0].p];
+    for (let i = 1; i < it.path.length; i++) {
+      const seg = it.path[i];
+      if (seg.cp) pts.push(seg.cp);
+      pts.push(seg.p);
+    }
+    return pts;
+  }
   return [];
 }
 
 function setItemPoints(it, pts) {
   if (it.kind === 'line') { it.p1 = pts[0]; it.p2 = pts[1]; }
   if (it.kind === 'quadratic') { it.p1 = pts[0]; it.cp = pts[1]; it.p2 = pts[2]; }
-  if (it.kind === 'shape') it.path = pts;
+  if (it.kind === 'shape') {
+    const newPath = [];
+    let idx = 0;
+    newPath.push({ p: pts[idx++] });
+    for (let i = 1; i < it.path.length; i++) {
+      const seg = it.path[i];
+      const out = { type: seg.type, p: pts[idx++] };
+      if (seg.cp) out.cp = pts[idx++];
+      newPath.push(out);
+    }
+    it.path = newPath;
+  }
 }

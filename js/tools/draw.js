@@ -27,12 +27,25 @@ export function renderItem(ctx, item, showHandles = false) {
     ctx.beginPath(); ctx.moveTo(item.p1.x, item.p1.y); ctx.quadraticCurveTo(item.cp.x, item.cp.y, item.p2.x, item.p2.y); ctx.stroke();
     if (showHandles) drawHandles(ctx, [item.p1, item.cp, item.p2]);
   } else if (item.kind === 'shape') {
-    ctx.beginPath(); ctx.moveTo(item.path[0].x, item.path[0].y);
-    for (let i = 1; i < item.path.length; i++) ctx.lineTo(item.path[i].x, item.path[i].y);
+    ctx.beginPath();
+    ctx.moveTo(item.path[0].p.x, item.path[0].p.y);
+    for (let i = 1; i < item.path.length; i++) {
+      const seg = item.path[i];
+      if (seg.type === 'quadratic' && seg.cp) ctx.quadraticCurveTo(seg.cp.x, seg.cp.y, seg.p.x, seg.p.y);
+      else ctx.lineTo(seg.p.x, seg.p.y);
+    }
     ctx.closePath();
     if (item.fill) { ctx.fillStyle = item.fill; ctx.fill(); }
     if (item.width > 0) ctx.stroke();
-    if (showHandles) drawHandles(ctx, item.path);
+    if (showHandles) {
+      const pts = [item.path[0].p];
+      for (let i = 1; i < item.path.length; i++) {
+        const seg = item.path[i];
+        if (seg.cp) pts.push(seg.cp);
+        pts.push(seg.p);
+      }
+      drawHandles(ctx, pts);
+    }
   }
   ctx.restore();
 }
@@ -50,7 +63,7 @@ function drawHandles(ctx, pts) {
 function itemCenter(it) {
   const pts = it.kind === 'line' ? [it.p1, it.p2]
     : it.kind === 'quadratic' ? [it.p1, it.cp, it.p2]
-    : it.path;
+    : it.path.flatMap((seg, i) => i === 0 ? [seg.p] : (seg.cp ? [seg.cp, seg.p] : [seg.p]));
   const xs = pts.map(p => p.x);
   const ys = pts.map(p => p.y);
   return { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 };
