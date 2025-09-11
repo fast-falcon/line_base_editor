@@ -71,7 +71,7 @@ export function initToolbar() {
       <button id="apply" class="btn" title="ثبت (Enter)">اعمال</button>
     </div>
     <div class="right">
-      <input id="fileInput" type="file" accept=".json" class="btn" title="بارگذاری JSON"/>
+      <input id="fileInput" type="file" accept="application/json,.json,.linepack.json" class="btn" title="بارگذاری JSON"/>
       <button id="saveJSON" class="btn primary" title="ذخیره LinePack+Anim">ذخیره JSON</button>
       <button id="saveJSONMin" class="btn" title="ذخیره کمینه">ذخیره کمینه</button>
       <button id="exportPNG" class="btn" title="PNG">PNG</button>
