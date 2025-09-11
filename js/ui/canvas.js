@@ -33,3 +33,7 @@ function draw() {
   if (state.drawing) renderItem(ctx, state.drawing, true);
   updateGhost();
 }
+
+export function redraw() {
+  draw();
+}
