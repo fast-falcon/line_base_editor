@@ -43,12 +43,11 @@ export function onMouseMove(e) {
       emit('draw');
       updateGhost();
     } else if (dragging.type === 'move') {
-      const dx = mp.x - dragging.start.x;
-      const dy = mp.y - dragging.start.y;
-      dragging.start = mp;
-      for (const it of selectionItems()) {
-        const pts = itemPoints(it).map(p => ({ x: p.x + dx, y: p.y + dy }));
-        setItemPoints(it, pts);
+      const dx = mp.x - dragging.origin.x;
+      const dy = mp.y - dragging.origin.y;
+      for (const entry of dragging.items) {
+        const pts = entry.pts.map(p => ({ x: p.x + dx, y: p.y + dy }));
+        setItemPoints(entry.it, pts);
       }
       emit('draw');
       updateGhost();
@@ -147,7 +146,11 @@ export function onMouseDown(e) {
       updateGhost();
     }
     if (state.selected.size) {
-      dragging = { type: 'move', start: mp };
+      dragging = {
+        type: 'move',
+        origin: mp,
+        items: selectionItems().map(it => ({ it, pts: itemPoints(it).map(p => ({ ...p })) }))
+      };
       pushHistory();
     }
     return;
@@ -163,7 +166,11 @@ export function onMouseDown(e) {
     }
     const box = selectionBBox();
     if (box && mp.x >= box.x && mp.x <= box.x + box.w && mp.y >= box.y && mp.y <= box.y + box.h) {
-      dragging = { type: 'move', start: mp };
+      dragging = {
+        type: 'move',
+        origin: mp,
+        items: selectionItems().map(it => ({ it, pts: itemPoints(it).map(p => ({ ...p })) }))
+      };
       pushHistory();
       return;
     }
