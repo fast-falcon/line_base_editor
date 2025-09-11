@@ -121,42 +121,57 @@ export function groupSelection() {
     }
     const [p1, cp, p2] = getQuadEnds(it); return isNormPoint(p1) && isNormPoint(cp) && isNormPoint(p2);
   });
-
   const avgW = Math.max(1, segObjs.reduce((s, it) => s + (+it.width || +it.style?.width || 1), 0) / segObjs.length);
+  const FLAT_EPS = Math.max(CONFIG.FLAT_EPS_MIN, Math.min(CONFIG.FLAT_EPS_MAX, avgW * 0.45));
 
-  const base = [];      // {a,b,len,prim}
-  const lengths = [];
-
-  function pushBase(a, b, prim) {
-    const len = Math.hypot(b.x - a.x, b.y - a.y);
-    if (len > 1e-3) {
-      base.push({ a, b, len, prim });
-      lengths.push(len);
-    }
-  }
-
-  for (let pi = 0; pi < segObjs.length; pi++) {
-    const it = segObjs[pi];
+  // pre-flatten segments to estimate average length
+  const flatPts = segObjs.map(_ => null);
+  let totalLen = 0, pieceCnt = 0;
+  for (let i = 0; i < segObjs.length; i++) {
+    const it = segObjs[i];
     if (it.kind === 'line') {
       const [p1, p2] = getLineEnds(it);
-      if (p1 && p2) pushBase(toPx(p1), toPx(p2), pi);
+      if (p1 && p2) {
+        const a = toPx(p1), b = toPx(p2);
+        flatPts[i] = [a, b];
+        const len = Math.hypot(b.x - a.x, b.y - a.y);
+        if (len > 1e-3) { totalLen += len; pieceCnt++; }
+      }
     } else {
       const [p1, cp, p2] = getQuadEnds(it);
       if (p1 && cp && p2) {
-        const pts = flattenQuadratic(toPx(p1), toPx(cp), toPx(p2), CONFIG.FLAT_EPS, 12);
-        for (let i = 1; i < pts.length; i++) pushBase(pts[i - 1], pts[i], pi);
+        const pts = flattenQuadratic(toPx(p1), toPx(cp), toPx(p2), FLAT_EPS, 12);
+        flatPts[i] = pts;
+        for (let k = 1; k < pts.length; k++) {
+          const len = Math.hypot(pts[k].x - pts[k - 1].x, pts[k].y - pts[k - 1].y);
+          if (len > 1e-3) { totalLen += len; pieceCnt++; }
+        }
       }
     }
   }
-  if (!base.length) return makePlainGroup(leafIds);
+  if (!pieceCnt) return makePlainGroup(leafIds);
+  const avgLen = totalLen / pieceCnt;
 
-  const avgLen = lengths.reduce((s, v) => s + v, 0) / lengths.length;
-  const MERGE_EPS = CONFIG.MERGE_EPS;
+  // dynamic thresholds derived from drawing size
+  const MERGE_EPS = Math.max(CONFIG.MERGE_EPS_MIN, Math.min(CONFIG.MERGE_EPS_MAX, avgLen * 0.10));
   const MERGE_EPS2 = MERGE_EPS * MERGE_EPS;
-  const NEAR_EPS = CONFIG.NEAR_EPS;
+  const NEAR_EPS = Math.max(CONFIG.NEAR_EPS_MIN, Math.min(CONFIG.NEAR_EPS_MAX, MERGE_EPS * 0.35));
   const NEAR_EPS2 = NEAR_EPS * NEAR_EPS;
-  const EDGE_MIN = CONFIG.EDGE_MIN;
+  const EDGE_MIN = Math.max(CONFIG.EDGE_MIN_MIN, Math.min(CONFIG.EDGE_MIN_MAX, avgW * CONFIG.EDGE_MIN_FACTOR));
   const EPS_TU = Math.min(0.15, Math.max(0.02, MERGE_EPS / (avgLen + 1e-6)));
+
+  // ---------- 1) Base segments ----------
+  const base = [];      // {a,b,len,prim}
+  function pushBase(a, b, prim) {
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    if (len > 1e-3) base.push({ a, b, len, prim });
+  }
+  for (let i = 0; i < segObjs.length; i++) {
+    const pts = flatPts[i];
+    if (!pts || pts.length < 2) continue;
+    for (let k = 1; k < pts.length; k++) pushBase(pts[k - 1], pts[k], i);
+  }
+  if (!base.length) return makePlainGroup(leafIds);
 
   // ---------- 2) Split on intersections and T-junctions ----------
   const cuts = base.map(_ => new Set([0, 1]));
