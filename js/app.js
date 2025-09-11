@@ -66,7 +66,6 @@ function main() {
     if (e.target.tagName === 'INPUT') return;
     if (e.key === 'Escape') { state.drawing = null; emit('draw'); }
     if (e.key === 'Enter') { commitDrawing(); }
-    if (e.key === 'Delete') { deleteSelection(); }
     if (e.ctrlKey && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); pushHistory(); undo(); emit('draw'); emit('refreshList'); }
     if (e.ctrlKey && e.key.toLowerCase() === 'z' && e.shiftKey) { e.preventDefault(); pushHistory(); redo(); emit('draw'); emit('refreshList'); }
     if (e.ctrlKey && e.key.toLowerCase() === 'g' && !e.shiftKey) { e.preventDefault(); groupSelection(); }
