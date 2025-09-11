@@ -8,6 +8,7 @@ import { pushHistory, undo, redo } from './utils/history.js';
 
 import { groupSelection, ungroupSelection } from './tools/group.js';
 import { exportJSON, importJSON } from './utils/file.js';
+import { initManip } from './tools/manip.js';
 window.keys = { ctrl: false, shift: false };
 window.addEventListener('keydown', e => {
   if (e.key === 'Control') window.keys.ctrl = true;
@@ -19,6 +20,7 @@ window.addEventListener('keyup', e => {
 });
 function main() {
   initToolbar();
+  initManip();
   initSidebar();
   initCanvas();
   initTimeline();
