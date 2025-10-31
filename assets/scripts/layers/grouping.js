@@ -195,16 +195,17 @@ function registerGrouping(ctx) {
             const aRef = add(a, prim);
             const bRef = add(b, prim);
             pts.push({ a: aRef, b: bRef, owner: owners[prim] });
+            return { a: aRef, b: bRef };
         }
 
         segs.forEach((seg, idx) => pushBase(seg.a, seg.b, idx));
 
         for (const hit of nearHits) {
             const { p, segA, segB } = hit;
-            const aRef = pushBase(p, p, segA);
-            const bRef = pushBase(p, p, segB);
-            aRef.segs.add(segB);
-            bRef.segs.add(segA);
+            const { a: refA } = pushBase(p, p, segA);
+            const { a: refB } = pushBase(p, p, segB);
+            refA.segs.add(segB);
+            refB.segs.add(segA);
         }
 
         const nodes = [...merged.values()];
