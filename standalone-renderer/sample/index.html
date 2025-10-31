@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>LinePackRenderer Sample</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: system-ui, sans-serif;
+            background: #111827;
+            color: #f9fafb;
+            display: grid;
+            place-items: center;
+            min-height: 100vh;
+        }
+        main {
+            width: 80vw;
+            max-width: 720px;
+        }
+        canvas {
+            width: 100%;
+            aspect-ratio: 1 / 1;
+            background: #0f172a;
+            border-radius: 16px;
+            box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.6);
+        }
+        pre {
+            background: rgba(15, 23, 42, 0.85);
+            padding: 1rem;
+            border-radius: 12px;
+            overflow: auto;
+        }
+    </style>
+</head>
+<body>
+<main>
+    <h1>Standalone LinePack Renderer</h1>
+    <p>This example shows how to load an exported LinePack JSON file and play one of its animations without the editor UI.</p>
+    <canvas id="preview" width="512" height="512"></canvas>
+    <section>
+        <h2>Usage</h2>
+        <pre><code>import { LinePackRenderer } from '../LinePackRenderer.js';
+
+const canvas = document.querySelector('#preview');
+const renderer = new LinePackRenderer(canvas);
+await renderer.loadFromURL('./sample-pack.json');
+renderer.play('Demo');</code></pre>
+    </section>
+</main>
+<script type="module">
+import { LinePackRenderer } from '../LinePackRenderer.js';
+
+const canvas = document.querySelector('#preview');
+const renderer = new LinePackRenderer(canvas);
+await renderer.loadFromURL('./sample-pack.json');
+renderer.play('Demo');
+</script>
+</body>
+</html>
