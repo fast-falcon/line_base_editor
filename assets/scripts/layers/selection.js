@@ -5,7 +5,7 @@
 
 function registerSelection(ctx) {
     const { state, ui, utils, canvas, api } = ctx;
-    const { rndId, dist, quadAt } = utils;
+    const { rndId, dist } = utils;
 
     function selectionLeafItems() {
         const out = [];
@@ -148,32 +148,11 @@ function registerSelection(ctx) {
                     prev = pt;
                 }
             } else if (item.kind === 'shape') {
-                const segs = Array.isArray(item.segments) && item.segments.length ? item.segments : null;
-                if (segs) {
-                    for (const seg of segs) {
-                        if (!seg || !seg.p1 || !seg.p2) continue;
-                        if (seg.kind === 'quadratic' && seg.cp) {
-                            const N = 32;
-                            let prev = seg.p1;
-                            for (let i = 1; i <= N; i++) {
-                                const t = i / N;
-                                const q = quadAt(seg.p1, seg.cp, seg.p2, t);
-                                edges.push([prev, q]);
-                                pts.push(prev, q);
-                                prev = q;
-                            }
-                        } else {
-                            edges.push([seg.p1, seg.p2]);
-                            pts.push(seg.p1, seg.p2);
-                        }
-                    }
-                } else {
-                    for (let i = 0; i < item.path.length; i++) {
-                        const a = item.path[i];
-                        const b = item.path[(i + 1) % item.path.length];
-                        edges.push([a, b]);
-                        pts.push(a, b);
-                    }
+                for (let i = 0; i < item.path.length; i++) {
+                    const a = item.path[i];
+                    const b = item.path[(i + 1) % item.path.length];
+                    edges.push([a, b]);
+                    pts.push(a, b);
                 }
             }
         }

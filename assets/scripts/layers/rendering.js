@@ -82,50 +82,23 @@ function registerRendering(ctx) {
                 drawHandles([item.p1, item.cp, item.p2]);
             }
         } else if (item.kind === 'shape') {
-            const segs = Array.isArray(item.segments) ? item.segments.filter(seg => seg && seg.p1 && seg.p2) : [];
-            if (segs.length) {
-                canvasCtx.beginPath();
-                canvasCtx.moveTo(segs[0].p1.x, segs[0].p1.y);
-                for (const seg of segs) {
-                    if (seg.kind === 'quadratic' && seg.cp) {
-                        canvasCtx.quadraticCurveTo(seg.cp.x, seg.cp.y, seg.p2.x, seg.p2.y);
-                    } else {
-                        canvasCtx.lineTo(seg.p2.x, seg.p2.y);
-                    }
-                }
-                canvasCtx.closePath();
-                if (item.fill) {
-                    canvasCtx.fillStyle = item.fill;
-                    canvasCtx.fill();
-                }
-                if (item.width > 0) canvasCtx.stroke();
-                if (showHandles) {
-                    const handles = [];
-                    for (const seg of segs) {
-                        handles.push(seg.p1, seg.p2);
-                        if (seg.kind === 'quadratic' && seg.cp) handles.push(seg.cp);
-                    }
-                    drawHandles(handles.filter(Boolean));
-                }
-            } else {
-                const path = item.path;
-                if (!path.length) {
-                    canvasCtx.restore();
-                    return;
-                }
-                canvasCtx.beginPath();
-                canvasCtx.moveTo(path[0].x, path[0].y);
-                for (let i = 1; i < path.length; i++) {
-                    canvasCtx.lineTo(path[i].x, path[i].y);
-                }
-                canvasCtx.closePath();
-                if (item.fill) {
-                    canvasCtx.fillStyle = item.fill;
-                    canvasCtx.fill();
-                }
-                if (item.width > 0) canvasCtx.stroke();
-                if (showHandles) drawHandles(path);
+            const path = item.path;
+            if (!path.length) {
+                canvasCtx.restore();
+                return;
             }
+            canvasCtx.beginPath();
+            canvasCtx.moveTo(path[0].x, path[0].y);
+            for (let i = 1; i < path.length; i++) {
+                canvasCtx.lineTo(path[i].x, path[i].y);
+            }
+            canvasCtx.closePath();
+            if (item.fill) {
+                canvasCtx.fillStyle = item.fill;
+                canvasCtx.fill();
+            }
+            if (item.width > 0) canvasCtx.stroke();
+            if (showHandles) drawHandles(path);
         }
         canvasCtx.restore();
     }
