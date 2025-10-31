@@ -93,7 +93,10 @@ const LinePackPro = (() => {
         refreshAnimSelect: modules.timeline.refreshAnimSelect,
         putKeyframe: modules.timeline.putKeyframe,
         hasKeyAt: modules.timeline.hasKeyAt,
-        stepPlay: modules.timeline.stepPlay
+        stepPlay: modules.timeline.stepPlay,
+        renderKeyframeList: modules.timeline.renderKeyframeList,
+        applyTimelineSec: modules.timeline.applyTimelineSec,
+        restorePreviewBackup: ctx.api.restorePreviewBackup
     };
 
     const InputSystemModule = {

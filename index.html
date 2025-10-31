@@ -112,23 +112,33 @@
             <div id="elemList" class="list" style="margin-top:8px"></div>
         </div>
         <div id="panelAnims" class="panel hide">
-            <div style="display:grid;gap:8px">
-                <div style="display:flex;gap:6px;align-items:center">
-                    <input id="animName" class="btn" type="text" placeholder="نام کلیپ" style="width: 160px"/>
-                    <button id="addAnim" class="btn">+ جدید</button>
-                    <button id="renameAnim" class="btn">تغییر نام</button>
+            <div class="anim-panel">
+                <div class="anim-panel__col">
+                    <div class="anim-form">
+                        <input id="animName" class="btn" type="text" placeholder="نام کلیپ" />
+                        <button id="addAnim" class="btn">+ جدید</button>
+                        <button id="renameAnim" class="btn">تغییر نام</button>
+                    </div>
+                    <div class="anim-duration">
+                        <label>مدت (ثانیه)
+                            <input id="animDur" class="btn" type="number" min="1" max="360" value="5" />
+                        </label>
+                    </div>
+                    <div class="anim-list-head">انیمیشن‌های ساخته‌شده</div>
+                    <div id="animList" class="anim-list surface"></div>
                 </div>
-                <div style="display:flex;gap:6px;align-items:center">
-                    <select id="animSelect" class="btn" style="min-width: 180px"></select>
-                    <label>مدت (ثانیه) <input id="animDur" class="btn" type="number" min="1" max="360" value="5"
-                                              style="width:80px"/>
-                    </label>
-                </div>
-                <div style="display:flex;gap:6px;align-items:center">
-                    <button id="setKey" class="btn">ثبت کلیدفریم</button>
-                    <button id="play" class="btn">پخش</button>
-                    <button id="pause" class="btn">توقف</button>
-                    <button id="delAnim" class="btn danger">حذف کلیپ</button>
+                <div class="anim-panel__col">
+                    <div class="anim-actions">
+                        <button id="setKey" class="btn">ثبت کلیدفریم</button>
+                        <button id="play" class="btn">پخش</button>
+                        <button id="pause" class="btn">توقف</button>
+                        <button id="delAnim" class="btn danger">حذف کلیپ</button>
+                    </div>
+                    <div class="keyframe-head">
+                        <span>کلیدفریم‌ها</span>
+                        <small>برای ویرایش زمان روی مقدار دوبار کلیک کن</small>
+                    </div>
+                    <div id="keyframeList" class="keyframe-list surface"></div>
                 </div>
             </div>
         </div>

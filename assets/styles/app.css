@@ -214,6 +214,134 @@
             padding: 8px
         }
 
+        .surface {
+            background: rgba(31, 35, 56, 0.6);
+            border: 1px solid #2b315b;
+            border-radius: 12px;
+            padding: 10px;
+        }
+
+        .anim-panel {
+            display: grid;
+            gap: 12px;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        }
+
+        .anim-panel__col {
+            display: grid;
+            gap: 12px;
+            align-content: start;
+        }
+
+        .anim-form {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .anim-form input {
+            flex: 1 1 140px;
+        }
+
+        .anim-duration {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .anim-duration label {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .anim-duration input {
+            width: 90px;
+        }
+
+        .anim-list-head,
+        .keyframe-head {
+            font-size: 13px;
+            color: var(--muted);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .anim-list,
+        .keyframe-list {
+            display: grid;
+            gap: 8px;
+            max-height: 280px;
+            overflow: auto;
+        }
+
+        .anim-row,
+        .keyframe-row {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 10px;
+            border: 1px solid #2b315b;
+            border-radius: 10px;
+            background: rgba(23, 26, 43, 0.8);
+            transition: background .2s ease;
+        }
+
+        .anim-row:hover,
+        .keyframe-row:hover {
+            background: rgba(41, 46, 78, 0.9);
+        }
+
+        .anim-row.active,
+        .keyframe-row.active {
+            outline: 2px solid var(--accent-2);
+            background: rgba(36, 42, 77, 0.95);
+        }
+
+        .anim-row .meta,
+        .keyframe-row .meta {
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .anim-row .title,
+        .keyframe-row .title {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .anim-row .actions,
+        .keyframe-row .actions,
+        .anim-actions {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        .btn.sm {
+            padding: 5px 9px;
+            font-size: 12px;
+            border-radius: 9px;
+        }
+
+        .anim-empty,
+        .kf-empty {
+            font-size: 12px;
+            color: var(--muted);
+            text-align: center;
+            padding: 12px;
+        }
+
+        .keyframe-time-input {
+            width: 80px;
+            padding: 6px 8px;
+        }
+
         .list {
             display: grid;
             gap: 6px
@@ -329,6 +457,27 @@
         .tl-body {
             position: absolute;
             inset: 48px 0 0 0
+        }
+
+        .tl-body::before,
+        .tl-body::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 24px;
+            background: linear-gradient(90deg, rgba(15, 18, 32, 1), rgba(15, 18, 32, 0));
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        .tl-body::after {
+            right: 0;
+            transform: scaleX(-1);
+        }
+
+        .tl-body::before {
+            left: 0;
         }
 
         .ticks {
