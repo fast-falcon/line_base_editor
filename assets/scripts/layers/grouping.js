@@ -248,11 +248,12 @@ function registerGrouping(ctx) {
 
         const verts = [];
         const idxOf = new Map();
-        function addPt(p) {
-            const id = key(p);
+        function addPt(node) {
+            const id = key(node);
             if (idxOf.has(id)) return idxOf.get(id);
             const idx = verts.length;
-            verts.push({ x: p.x, y: p.y, edges: new Set() });
+            node.edges = new Set();
+            verts.push(node);
             idxOf.set(id, idx);
             return idx;
         }
@@ -309,8 +310,6 @@ function registerGrouping(ctx) {
             }
         }
 
-        const polys = faces.map(idx => idx.map(i => verts[i]));
-
         function ownerOf(u, v) {
             for (const edge of graphEdges) {
                 if ((edge.a === u && edge.b === v) || (edge.a === v && edge.b === u)) return edge.owner;
@@ -331,6 +330,7 @@ function registerGrouping(ctx) {
                     owner
                 });
             }
+            if (!path.length) return [];
             const cleaned = [path[0]];
             const ANG_EPS = 8.6 * Math.PI / 180;
             for (let i = 1; i < path.length - 1; i++) {
@@ -351,7 +351,7 @@ function registerGrouping(ctx) {
             return cleaned;
         }
 
-        const simplePolys = polys.map(simplifyFaceIdx).filter(p => p.length >= 3);
+        const simplePolys = faces.map(simplifyFaceIdx).filter(p => p.length >= 3);
         const areas = simplePolys.map(poly => {
             let area = 0;
             for (let i = 0; i < poly.length; i++) {
