@@ -63,7 +63,12 @@ function registerFileSystem(ctx) {
 
         state.items = (pack.elements || []).map(el => deserializeItem(el, size));
         state.currentAnimId = state.animations[0]?.id || null;
+        state.tl.previewing = false;
+        state.tl.previewBackup = null;
+        state.tl.sec = 0;
+        state.tl.playing = false;
         api.refreshAnimSelect && api.refreshAnimSelect();
+        api.renderKeyframeList && api.renderKeyframeList();
         api.refreshElemList && api.refreshElemList();
         api.draw && api.draw();
         api.rebuildTicks && api.rebuildTicks();

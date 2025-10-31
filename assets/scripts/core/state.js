@@ -16,6 +16,8 @@ export const state = {
         sec: 0,
         playing: false,
         startTime: 0,
-        loop: true
+        loop: true,
+        previewing: false,
+        previewBackup: null
     }
 };
