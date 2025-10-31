@@ -1,3 +1,8 @@
+/**
+ * @fileoverview Supplies undo and redo stack management for LinePack Pro,
+ * capturing state snapshots so editing operations remain reversible.
+ */
+
 function registerHistory(ctx) {
     const { state, ui, api } = ctx;
 

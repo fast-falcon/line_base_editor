@@ -1,3 +1,8 @@
+/**
+ * @fileoverview Maintains selection state, tool management, and shape
+ * construction utilities used throughout LinePack Pro editing workflows.
+ */
+
 function registerSelection(ctx) {
     const { state, ui, utils, canvas, api } = ctx;
     const { rndId, dist } = utils;

@@ -1,3 +1,9 @@
+/**
+ * @fileoverview Collects and exports cached DOM references for the modular
+ * LinePack Pro runtime so that individual layer registrars can interact with
+ * the interface without repeatedly querying the document.
+ */
+
 export const toolbar = document.getElementById('toolbar');
 export const stageWrap = document.getElementById('stageWrap');
 export const canvas = document.getElementById('canvas');

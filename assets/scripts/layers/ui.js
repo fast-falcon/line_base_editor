@@ -1,3 +1,8 @@
+/**
+ * @fileoverview Synchronizes LinePack Pro UI panels with the editor state,
+ * including the layer list, overlays, and contextual controls.
+ */
+
 function registerUI(ctx) {
     const { state, ui, api } = ctx;
 

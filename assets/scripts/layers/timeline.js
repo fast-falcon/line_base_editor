@@ -1,3 +1,8 @@
+/**
+ * @fileoverview Powers the animation timeline for LinePack Pro, including
+ * keyframe management, playback control, and cursor rendering.
+ */
+
 function registerTimeline(ctx) {
     const { state, ui, utils, api } = ctx;
     const { clamp, rndId, lerp, lpt } = utils;

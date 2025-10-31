@@ -1,3 +1,8 @@
+/**
+ * @fileoverview Implements advanced grouping and face-detection utilities
+ * responsible for building closed shapes from vector segments in LinePack Pro.
+ */
+
 function registerGrouping(ctx) {
     const { state, canvas, ui, utils, api } = ctx;
     const { rndId, clamp, dist } = utils;

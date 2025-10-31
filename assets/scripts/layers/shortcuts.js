@@ -1,3 +1,8 @@
+/**
+ * @fileoverview Hooks global keyboard shortcuts for LinePack Pro, mapping
+ * key combos to module APIs for rapid tool switching and file actions.
+ */
+
 function registerShortcuts(ctx) {
     const { ui, api } = ctx;
     const shortcuts = {

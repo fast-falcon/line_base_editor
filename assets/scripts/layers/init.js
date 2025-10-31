@@ -1,3 +1,8 @@
+/**
+ * @fileoverview Boots the LinePack Pro interface by wiring initial UI state,
+ * tab toggles, and first renders once all layer APIs have been registered.
+ */
+
 function registerInit(ctx) {
     const { ui, api } = ctx;
 

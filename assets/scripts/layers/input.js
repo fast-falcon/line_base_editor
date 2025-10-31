@@ -1,3 +1,8 @@
+/**
+ * @fileoverview Handles mouse, keyboard, and drawing interactions for
+ * LinePack Pro, translating raw events into selection and geometry updates.
+ */
+
 function registerInput(ctx) {
     const { state, ui, utils, canvas, api } = ctx;
     const { rndId, itemPoints, setItemPoints } = utils;

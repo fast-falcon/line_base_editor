@@ -1,3 +1,8 @@
+/**
+ * @fileoverview Aggregates all modular LinePack Pro layers into the public
+ * runtime object, wiring shared context and exposing layer-level APIs.
+ */
+
 import { createContext } from './context.js';
 import { registerUtilities } from './utilities.js';
 import { registerSelection } from './selection.js';

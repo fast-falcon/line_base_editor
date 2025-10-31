@@ -1,3 +1,8 @@
+/**
+ * @fileoverview Provides reusable geometry and math helpers shared across
+ * LinePack Pro layers, keeping vector and animation calculations consistent.
+ */
+
 export const rndId = (p = 'it') => `${p}_${Math.random().toString(36).slice(2, 9)}`;
 export const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 export const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);

@@ -1,3 +1,8 @@
+/**
+ * @fileoverview Exposes shared utility helpers for LinePack Pro modules,
+ * including selection bounds, hit-testing math, and CSS queries.
+ */
+
 function registerUtilities(ctx) {
     const { state, ui, canvas, stageWrap, utils } = ctx;
     const { dist, itemPoints } = utils;

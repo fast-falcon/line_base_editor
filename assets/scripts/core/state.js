@@ -1,3 +1,8 @@
+/**
+ * @fileoverview Defines the shared reactive state container consumed by the
+ * LinePack Pro modules, ensuring every layer works with the same data model.
+ */
+
 export const state = {
     tool: 'select',
     items: [],

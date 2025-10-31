@@ -1,3 +1,8 @@
+/**
+ * @fileoverview Renders the LinePack Pro canvas, drawing grid, guides, and
+ * vector elements in response to state changes.
+ */
+
 function registerRendering(ctx) {
     const { state, ui, utils, stageWrap, canvas, ctx: canvasCtx, dpr, toolbar, api } = ctx;
     const { itemCenter, itemPoints } = utils;

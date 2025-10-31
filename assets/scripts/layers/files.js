@@ -1,3 +1,8 @@
+/**
+ * @fileoverview Manages import and export operations for LinePack Pro packs,
+ * including JSON serialization, minified saves, and PNG rendering helpers.
+ */
+
 function registerFileSystem(ctx) {
     const { state, ui, canvas, api, utils } = ctx;
     const { rndId } = utils;
