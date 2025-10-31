@@ -1,0 +1,90 @@
+{
+  "type": "LinePack",
+  "version": 2,
+  "size": { "w": 512, "h": 512 },
+  "elements": [
+    {
+      "id": "line1",
+      "type": "line",
+      "start": { "x": 0.1, "y": 0.5 },
+      "end": { "x": 0.9, "y": 0.5 },
+      "style": { "color": "#3b82f6", "width": 6 }
+    },
+    {
+      "id": "dot",
+      "type": "shape",
+      "path": [
+        { "x": 0.5, "y": 0.5 },
+        { "x": 0.51, "y": 0.5 },
+        { "x": 0.5, "y": 0.51 }
+      ],
+      "style": { "color": "#ef4444", "width": 0 }
+    }
+  ],
+  "animations": [
+    {
+      "id": "anim_demo",
+      "name": "Demo",
+      "duration": 4,
+      "keyframes": [
+        {
+          "t": 0,
+          "snapshot": [
+            {
+              "id": "line1",
+              "type": "line",
+              "start": { "x": 0.1, "y": 0.5 },
+              "end": { "x": 0.9, "y": 0.5 },
+              "style": { "color": "#3b82f6", "width": 6 }
+            },
+            {
+              "id": "dot",
+              "type": "line",
+              "start": { "x": 0.1, "y": 0.5 },
+              "end": { "x": 0.1, "y": 0.5 },
+              "style": { "color": "#ef4444", "width": 12 }
+            }
+          ]
+        },
+        {
+          "t": 2,
+          "snapshot": [
+            {
+              "id": "line1",
+              "type": "line",
+              "start": { "x": 0.1, "y": 0.5 },
+              "end": { "x": 0.9, "y": 0.5 },
+              "style": { "color": "#3b82f6", "width": 6 }
+            },
+            {
+              "id": "dot",
+              "type": "line",
+              "start": { "x": 0.5, "y": 0.5 },
+              "end": { "x": 0.5, "y": 0.5 },
+              "style": { "color": "#ef4444", "width": 12 }
+            }
+          ]
+        },
+        {
+          "t": 4,
+          "snapshot": [
+            {
+              "id": "line1",
+              "type": "line",
+              "start": { "x": 0.1, "y": 0.5 },
+              "end": { "x": 0.9, "y": 0.5 },
+              "style": { "color": "#3b82f6", "width": 6 }
+            },
+            {
+              "id": "dot",
+              "type": "line",
+              "start": { "x": 0.9, "y": 0.5 },
+              "end": { "x": 0.9, "y": 0.5 },
+              "style": { "color": "#ef4444", "width": 12 }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
