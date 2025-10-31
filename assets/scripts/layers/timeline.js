@@ -158,8 +158,32 @@ function registerTimeline(ctx) {
             const segA = Array.isArray(a.segments) ? a.segments : null;
             const segB = Array.isArray(b.segments) ? b.segments : null;
             if (segA || segB) {
-                const src = t < 0.5 ? (segA || segB) : (segB || segA);
-                o.segments = src ? JSON.parse(JSON.stringify(src)) : undefined;
+                const max = Math.max(segA ? segA.length : 0, segB ? segB.length : 0);
+                const segs = [];
+                for (let i = 0; i < max; i++) {
+                    const sA = segA ? segA[i] : null;
+                    const sB = segB ? segB[i] : null;
+                    if (sA && sB) {
+                        const seg = {
+                            kind: sA.kind || sB.kind,
+                            _from: sA._from ?? sB._from,
+                            _to: sA._to ?? sB._to
+                        };
+                        if (sA.p1 && sB.p1) seg.p1 = lpt(sA.p1, sB.p1, t);
+                        else if (sA.p1 || sB.p1) seg.p1 = JSON.parse(JSON.stringify(sA.p1 || sB.p1));
+                        if (sA.p2 && sB.p2) seg.p2 = lpt(sA.p2, sB.p2, t);
+                        else if (sA.p2 || sB.p2) seg.p2 = JSON.parse(JSON.stringify(sA.p2 || sB.p2));
+                        if (sA.cp || sB.cp) {
+                            if (sA.cp && sB.cp) seg.cp = lpt(sA.cp, sB.cp, t);
+                            else seg.cp = JSON.parse(JSON.stringify(sA.cp || sB.cp));
+                        }
+                        segs.push(seg);
+                    } else {
+                        const src = sA || sB;
+                        if (src) segs.push(JSON.parse(JSON.stringify(src)));
+                    }
+                }
+                o.segments = segs;
             }
         }
         return o;
