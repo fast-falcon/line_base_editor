@@ -41,7 +41,18 @@ function registerFileSystem(ctx) {
         const norm = p => ({ x: +(p.x / w).toFixed(min ? 3 : 6), y: +(p.y / h).toFixed(min ? 3 : 6) });
         if (it.kind === 'line') return { ...base, points: { p1: norm(it.p1), p2: norm(it.p2) } };
         if (it.kind === 'quadratic') return { ...base, points: { p1: norm(it.p1), cp: norm(it.cp), p2: norm(it.p2) } };
-        if (it.kind === 'shape') return { ...base, fill: it.fill || null, path: it.path.map(norm), children: it.children || [] };
+        if (it.kind === 'shape') {
+            const segs = Array.isArray(it.segments) ? it.segments.map(seg => {
+                if (!seg || !seg.p1 || !seg.p2) return null;
+                if (seg.kind === 'quadratic' && seg.cp) {
+                    return { kind: 'quadratic', p1: norm(seg.p1), cp: norm(seg.cp), p2: norm(seg.p2) };
+                }
+                return { kind: 'line', p1: norm(seg.p1), p2: norm(seg.p2) };
+            }).filter(Boolean) : null;
+            const out = { ...base, fill: it.fill || null, path: it.path.map(norm), children: it.children || [] };
+            if (segs && segs.length) out.segments = segs;
+            return out;
+        }
         if (it.kind === 'group') return { ...base, children: it.children?.slice() || [] };
         return base;
     }
@@ -92,7 +103,16 @@ function registerFileSystem(ctx) {
             return { ...base, p1: den(el.points.p1), cp: den(el.points.cp), p2: den(el.points.p2) };
         }
         if (el.kind === 'shape') {
-            return { ...base, path: (el.path || []).map(den), fill: el.fill || null, children: el.children || [] };
+            const segs = Array.isArray(el.segments) ? el.segments.map(seg => {
+                if (!seg || !seg.p1 || !seg.p2) return null;
+                if (seg.kind === 'quadratic' && seg.cp) {
+                    return { kind: 'quadratic', p1: den(seg.p1), cp: den(seg.cp), p2: den(seg.p2) };
+                }
+                return { kind: 'line', p1: den(seg.p1), p2: den(seg.p2) };
+            }).filter(Boolean) : [];
+            const shape = { ...base, path: (el.path || []).map(den), fill: el.fill || null, children: el.children || [] };
+            if (segs.length) shape.segments = segs;
+            return shape;
         }
         if (el.kind === 'group') {
             return { ...base, children: el.children?.slice() || [] };

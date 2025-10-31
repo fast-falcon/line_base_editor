@@ -155,6 +155,12 @@ function registerTimeline(ctx) {
             for (let i = 0; i < n; i++) path.push(lpt(a.path[i], b.path[i], t));
             o.path = path;
             o.fill = t < 0.5 ? a.fill : b.fill;
+            const segA = Array.isArray(a.segments) ? a.segments : null;
+            const segB = Array.isArray(b.segments) ? b.segments : null;
+            if (segA || segB) {
+                const src = t < 0.5 ? (segA || segB) : (segB || segA);
+                o.segments = src ? JSON.parse(JSON.stringify(src)) : undefined;
+            }
         }
         return o;
     }

@@ -75,7 +75,25 @@ function registerInput(ctx) {
     function pointNearItem(p, it) {
         if (it.kind === 'line') return (api.pointLineDist ? api.pointLineDist(p, it.p1, it.p2) : 999) < Math.max(6, it.width + 4);
         if (it.kind === 'quadratic') return (api.pointQuadNear ? api.pointQuadNear(p, it.p1, it.cp, it.p2) : 999) < Math.max(6, it.width + 4);
-        if (it.kind === 'shape') return api.pointInPolygon ? api.pointInPolygon(p, it.path) : false;
+        if (it.kind === 'shape') {
+            const segs = Array.isArray(it.segments) ? it.segments : null;
+            const limit = Math.max(6, (it.width || 0) + 4);
+            if (segs && segs.length) {
+                let best = Infinity;
+                for (const seg of segs) {
+                    if (!seg || !seg.p1 || !seg.p2) continue;
+                    let distVal = Infinity;
+                    if (seg.kind === 'quadratic' && seg.cp && api.pointQuadNear) {
+                        distVal = api.pointQuadNear(p, seg.p1, seg.cp, seg.p2);
+                    } else if (api.pointLineDist) {
+                        distVal = api.pointLineDist(p, seg.p1, seg.p2);
+                    }
+                    if (distVal < best) best = distVal;
+                }
+                if (best <= limit) return true;
+            }
+            return api.pointInPolygon ? api.pointInPolygon(p, it.path) : false;
+        }
         return false;
     }
 

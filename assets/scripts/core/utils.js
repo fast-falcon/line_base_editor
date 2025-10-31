@@ -43,7 +43,106 @@ export function setItemPoints(it, pts) {
         it.p2 = pts[2];
     }
     if (it.kind === 'shape') {
+        const prevPath = Array.isArray(it.path) ? it.path.map(p => ({ x: p.x, y: p.y })) : [];
+        const prevSegments = Array.isArray(it.segments) ? it.segments.map(seg => ({
+            ...seg,
+            p1: seg?.p1 ? { x: seg.p1.x, y: seg.p1.y } : null,
+            p2: seg?.p2 ? { x: seg.p2.x, y: seg.p2.y } : null,
+            cp: seg?.cp ? { x: seg.cp.x, y: seg.cp.y } : null
+        })) : null;
+
         it.path = pts;
+
+        if (prevSegments && prevSegments.length && prevPath.length === pts.length) {
+            const n = pts.length;
+            let dx = 0;
+            let dy = 0;
+            let isTranslation = n > 0;
+            for (let i = 0; i < n; i++) {
+                const ddx = pts[i].x - prevPath[i].x;
+                const ddy = pts[i].y - prevPath[i].y;
+                if (i === 0) {
+                    dx = ddx;
+                    dy = ddy;
+                } else if (Math.abs(ddx - dx) > 1e-6 || Math.abs(ddy - dy) > 1e-6) {
+                    isTranslation = false;
+                    break;
+                }
+            }
+
+            const safeIndex = (idx) => {
+                if (!Number.isInteger(idx)) return null;
+                if (!n) return null;
+                let m = idx % n;
+                if (m < 0) m += n;
+                return m;
+            };
+
+            it.segments = prevSegments.map(seg => {
+                const next = {
+                    ...seg,
+                    p1: seg.p1 ? { x: seg.p1.x, y: seg.p1.y } : null,
+                    p2: seg.p2 ? { x: seg.p2.x, y: seg.p2.y } : null
+                };
+                if (seg.cp) next.cp = { x: seg.cp.x, y: seg.cp.y };
+
+                if (isTranslation) {
+                    if (next.p1) {
+                        next.p1.x += dx;
+                        next.p1.y += dy;
+                    }
+                    if (next.p2) {
+                        next.p2.x += dx;
+                        next.p2.y += dy;
+                    }
+                    if (next.cp) {
+                        next.cp.x += dx;
+                        next.cp.y += dy;
+                    }
+                    return next;
+                }
+
+                const fromIdx = safeIndex(seg._from);
+                const toIdx = safeIndex(seg._to);
+                let startShift = { dx: 0, dy: 0 };
+                let endShift = { dx: 0, dy: 0 };
+
+                if (fromIdx !== null && fromIdx < n) {
+                    const newStart = pts[fromIdx];
+                    const oldStart = prevPath[fromIdx];
+                    startShift = { dx: newStart.x - oldStart.x, dy: newStart.y - oldStart.y };
+                    next.p1 = { x: newStart.x, y: newStart.y };
+                }
+                if (toIdx !== null && toIdx < n) {
+                    const newEnd = pts[toIdx];
+                    const oldEnd = prevPath[toIdx];
+                    endShift = { dx: newEnd.x - oldEnd.x, dy: newEnd.y - oldEnd.y };
+                    next.p2 = { x: newEnd.x, y: newEnd.y };
+                }
+
+                if (next.cp) {
+                    let cpDx = 0;
+                    let cpDy = 0;
+                    let weight = 0;
+                    if (fromIdx !== null && fromIdx < n) {
+                        cpDx += startShift.dx;
+                        cpDy += startShift.dy;
+                        weight += 1;
+                    }
+                    if (toIdx !== null && toIdx < n) {
+                        cpDx += endShift.dx;
+                        cpDy += endShift.dy;
+                        weight += 1;
+                    }
+                    if (weight > 0) {
+                        next.cp.x += cpDx / weight;
+                        next.cp.y += cpDy / weight;
+                    }
+                }
+
+                return next;
+            });
+        }
     }
 }
 
