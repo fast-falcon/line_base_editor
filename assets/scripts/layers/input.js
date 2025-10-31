@@ -4,7 +4,7 @@
  */
 
 function registerInput(ctx) {
-    const { state, ui, utils, canvas, api } = ctx;
+    const { state, ui, utils, canvas, stageWrap, api } = ctx;
     const { rndId, itemPoints, setItemPoints } = utils;
     const keys = { ctrl: false, shift: false };
     ctx.dragging = null;
@@ -108,6 +108,25 @@ function registerInput(ctx) {
                     it.rot = (ctx.dragging.rot0.get(it.id) || 0) + ang;
                 }
                 ui.rotDeg.value = Math.round((leafs[0]?.rot || 0));
+                api.draw && api.draw();
+                api.updateGhost && api.updateGhost();
+            } else if (ctx.dragging.type === 'scale') {
+                const { center, baseVec, baseLen, points0 } = ctx.dragging;
+                const dot = (mp.x - center.x) * baseVec.x + (mp.y - center.y) * baseVec.y;
+                let scale = baseLen ? dot / (baseLen * baseLen) : 1;
+                if (!Number.isFinite(scale) || Number.isNaN(scale)) scale = 1;
+                scale = Math.abs(scale);
+                scale = Math.max(0.02, Math.min(scale, 100));
+                const leafs = api.selectionLeafItems ? api.selectionLeafItems() : [];
+                for (const it of leafs) {
+                    const pts0 = points0.get(it.id);
+                    if (!pts0) continue;
+                    const next = pts0.map(p0 => ({
+                        x: center.x + (p0.x - center.x) * scale,
+                        y: center.y + (p0.y - center.y) * scale
+                    }));
+                    setItemPoints(it, next);
+                }
                 api.draw && api.draw();
                 api.updateGhost && api.updateGhost();
             }
@@ -293,7 +312,7 @@ function registerInput(ctx) {
         if (e.key === 'Shift') keys.shift = false;
     });
 
-    canvas.addEventListener('mousemove', onMouseMove);
+    stageWrap?.addEventListener('mousemove', onMouseMove);
     canvas.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mouseup', () => {
         ctx.dragging = null;

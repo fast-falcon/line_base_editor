@@ -309,6 +309,27 @@
             cursor: grab
         }
 
+        .scale-h {
+            position: absolute;
+            width: 14px;
+            height: 14px;
+            border-radius: 4px;
+            background: rgba(155, 123, 255, .95);
+            border: 1px solid #2e1f58;
+            box-shadow: 0 0 0 1px rgba(0, 0, 0, .35);
+            pointer-events: auto;
+        }
+
+        .scale-h[data-dir="nw"],
+        .scale-h[data-dir="se"] {
+            cursor: nwse-resize
+        }
+
+        .scale-h[data-dir="ne"],
+        .scale-h[data-dir="sw"] {
+            cursor: nesw-resize
+        }
+
         /* ===== Timeline (bottom) ===== */
         .timeline {
             flex: 0 0 auto;

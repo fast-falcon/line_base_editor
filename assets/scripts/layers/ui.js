@@ -4,7 +4,8 @@
  */
 
 function registerUI(ctx) {
-    const { state, ui, api } = ctx;
+    const { state, ui, api, utils } = ctx;
+    const { itemPoints } = utils;
 
     function niceName(it) {
         return it.name || (it.kind === 'line' ? 'خط' : it.kind === 'quadratic' ? 'منحنی' : 'شکل');
@@ -105,9 +106,11 @@ function registerUI(ctx) {
 
     function updateGhost() {
         const box = api.selectionBBox ? api.selectionBBox() : null;
-        if (!box) {
+        const handles = ui.scaleHandles || [];
+        if (!box || state.tool !== 'select') {
             ui.ghost.classList.add('hide');
             ui.rotHandle.classList.add('hide');
+            handles.forEach(h => h.classList.add('hide'));
             return;
         }
         ui.ghost.classList.remove('hide');
@@ -118,6 +121,23 @@ function registerUI(ctx) {
         ui.ghost.style.height = Math.max(0, box.h) + 'px';
         ui.rotHandle.style.left = (box.cx - 8) + 'px';
         ui.rotHandle.style.top = (box.y - 26) + 'px';
+        const positions = {
+            nw: { x: box.x, y: box.y },
+            ne: { x: box.x + box.w, y: box.y },
+            se: { x: box.x + box.w, y: box.y + box.h },
+            sw: { x: box.x, y: box.y + box.h }
+        };
+        handles.forEach(handle => {
+            const dir = handle.dataset.dir;
+            const pos = positions[dir];
+            if (!pos) {
+                handle.classList.add('hide');
+                return;
+            }
+            handle.classList.remove('hide');
+            handle.style.left = (pos.x - 7) + 'px';
+            handle.style.top = (pos.y - 7) + 'px';
+        });
     }
 
     ui.helpBtn.addEventListener('click', () => {
@@ -176,6 +196,39 @@ function registerUI(ctx) {
         ctx.dragging = { type: 'rotate', base, rot0 };
         ui.rotHandle.style.cursor = 'grabbing';
         api.pushHistory && api.pushHistory();
+    });
+
+    function cornerPos(box, dir) {
+        if (!box) return null;
+        const lookup = {
+            nw: { x: box.x, y: box.y },
+            ne: { x: box.x + box.w, y: box.y },
+            se: { x: box.x + box.w, y: box.y + box.h },
+            sw: { x: box.x, y: box.y + box.h }
+        };
+        return lookup[dir] || null;
+    }
+
+    (ui.scaleHandles || []).forEach(handle => {
+        handle.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const dir = handle.dataset.dir;
+            const box = api.selectionBBox ? api.selectionBBox() : null;
+            if (!box) return;
+            const center = { x: box.cx, y: box.cy };
+            const corner = cornerPos(box, dir);
+            if (!corner) return;
+            const baseVec = { x: corner.x - center.x, y: corner.y - center.y };
+            const baseLen = Math.hypot(baseVec.x, baseVec.y) || 1;
+            const points0 = new Map();
+            (api.selectionLeafItems ? api.selectionLeafItems() : []).forEach(it => {
+                const pts = itemPoints(it).map(p => ({ x: p.x, y: p.y }));
+                points0.set(it.id, pts);
+            });
+            ctx.dragging = { type: 'scale', dir, center, baseVec, baseLen, points0 };
+            api.pushHistory && api.pushHistory();
+        });
     });
 
     ui.rotDeg.addEventListener('change', () => {

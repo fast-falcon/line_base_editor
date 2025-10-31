@@ -53,6 +53,7 @@ export const UI = {
     delAnim: document.getElementById('delAnim'),
     ghost: document.getElementById('ghost'),
     rotHandle: document.getElementById('rotHandle'),
+    scaleHandles: Array.from(document.querySelectorAll('.scale-h')),
     apply: document.getElementById('apply'),
     help: document.getElementById('help'),
     fillEnabled: document.getElementById('fillEnabled'),
