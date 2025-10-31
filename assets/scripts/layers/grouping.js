@@ -53,23 +53,19 @@ function registerGrouping(ctx) {
         }
 
         const mid = (a, b) => ({x: (a.x + b.x) / 2, y: (a.y + b.y) / 2});
-        const lerpPt = (A, B, t) => ({ x: A.x + (B.x - A.x) * t, y: A.y + (B.y - A.y) * t });
 
         function flattenQuadratic(p1, cp, p2, eps, maxDepth = 12) {
             const out = [];
-            (function rec(a, ta, c, tc, b, tb, depth) {
+            (function rec(a, c, b, depth) {
                 if (depth >= maxDepth || flatness2(a, c, b) <= eps * eps) {
-                    if (!out.length) out.push({ pt: a, t: ta });
-                    out.push({ pt: b, t: tb });
+                    if (!out.length) out.push(a);
+                    out.push(b);
                     return;
                 }
                 const a_c = mid(a, c), c_b = mid(c, b), m = mid(a_c, c_b);
-                const tMid = (ta + tb) / 2;
-                const tcLeft = (ta + tc) / 2;
-                const tcRight = (tc + tb) / 2;
-                rec(a, ta, a_c, tcLeft, m, tMid, depth + 1);
-                rec(m, tMid, c_b, tcRight, b, tb, depth + 1);
-            })(p1, 0, cp, 0.5, p2, 1, 0);
+                rec(a, a_c, m, depth + 1);
+                rec(m, c_b, b, depth + 1);
+            })(p1, cp, p2, 0);
             return out;
         }
 
@@ -126,41 +122,28 @@ function registerGrouping(ctx) {
 
         const avgW = Math.max(1, segObjs.reduce((s, it) => s + (+it.width || +it.style?.width || 1), 0) / segObjs.length);
 
-        const base = [];      // {a,b,len,prim,t0,t1,isCurve}
+        const base = [];      // {a,b,len,prim}
         const lengths = [];
 
-        function pushBase(a, b, prim, t0 = 0, t1 = 1, isCurve = false) {
+        function pushBase(a, b, prim) {
             const len = Math.hypot(b.x - a.x, b.y - a.y);
             if (len > 1e-3) {
-                base.push({a, b, len, prim, t0, t1, isCurve});
+                base.push({a, b, len, prim});
                 lengths.push(len);
             }
         }
 
-        const segMeta = segObjs.map((it) => {
+        for (let pi = 0; pi < segObjs.length; pi++) {
+            const it = segObjs[pi];
             if (it.kind === 'line') {
                 const [p1, p2] = getLineEnds(it);
-                if (p1 && p2) return { kind: 'line', p1: toPx(p1), p2: toPx(p2) };
-            } else if (it.kind === 'quadratic') {
+                if (p1 && p2) pushBase(toPx(p1), toPx(p2), pi);
+            } else {
                 const [p1, cp, p2] = getQuadEnds(it);
-                if (p1 && cp && p2) return { kind: 'quadratic', p1: toPx(p1), cp: toPx(cp), p2: toPx(p2) };
-            }
-            return null;
-        });
-
-        for (let pi = 0; pi < segObjs.length; pi++) {
-            const info = segMeta[pi];
-            if (!info) continue;
-            if (info.kind === 'line') {
-                pushBase(info.p1, info.p2, pi, 0, 1, false);
-            } else if (info.kind === 'quadratic') {
-                const { p1, cp, p2 } = info;
                 if (p1 && cp && p2) {
                     const FLAT_EPS = Math.max(0.9, Math.min(2.5, avgW * 0.45));
-                    const pts = flattenQuadratic(p1, cp, p2, FLAT_EPS, 12);
-                    for (let i = 1; i < pts.length; i++) {
-                        pushBase(pts[i - 1].pt, pts[i].pt, pi, pts[i - 1].t, pts[i].t, true);
-                    }
+                    const pts = flattenQuadratic(toPx(p1), toPx(cp), toPx(p2), FLAT_EPS, 12);
+                    for (let i = 1; i < pts.length; i++) pushBase(pts[i - 1], pts[i], pi);
                 }
             }
         }
@@ -220,20 +203,14 @@ function registerGrouping(ctx) {
             return Array.from(set).sort((a, b) => a - b).filter((v, i, a) => i === 0 || Math.abs(v - a[i - 1]) > 1e-6);
         }
 
-        const micro = []; // {a,b,prim,t0,t1,isCurve}
+        const micro = []; // {a,b,prim}
         for (let i = 0; i < base.length; i++) {
-            const seg = base[i];
-            const A = seg.a, B = seg.b, prim = seg.prim, ts = uniqSort(cuts[i]);
+            const A = base[i].a, B = base[i].b, prim = base[i].prim, ts = uniqSort(cuts[i]);
             for (let k = 0; k < ts.length - 1; k++) {
                 const t1 = ts[k], t2 = ts[k + 1];
                 const P = {x: A.x + (B.x - A.x) * t1, y: A.y + (B.y - A.y) * t1};
                 const Q = {x: A.x + (B.x - A.x) * t2, y: A.y + (B.y - A.y) * t2};
-                if (Math.hypot(Q.x - P.x, Q.y - P.y) > EDGE_MIN) {
-                    const span = seg.t1 - seg.t0;
-                    const tStart = seg.t0 + span * t1;
-                    const tEnd = seg.t0 + span * t2;
-                    micro.push({a: P, b: Q, prim, t0: tStart, t1: tEnd, isCurve: seg.isCurve});
-                }
+                if (Math.hypot(Q.x - P.x, Q.y - P.y) > EDGE_MIN) micro.push({a: P, b: Q, prim});
             }
         }
         if (!micro.length) return makePlainGroup(leafIds);
@@ -251,8 +228,7 @@ function registerGrouping(ctx) {
         }
 
         const E = []; // undirected edges [i,j]
-        const edgeOwner = new Map(); // 'min_max' -> {prim, isCurve}
-        const edgeDir = new Map(); // 'a->b' -> {prim, isCurve, t0, t1, reversed: bool}
+        const edgeOwner = new Map(); // 'min_max' -> prim
         const edgesAtV = new Map(); // v -> Set(prim)
 
         for (const e of micro) {
@@ -260,17 +236,14 @@ function registerGrouping(ctx) {
             if (A === B) continue;
             const ia = pts.indexOf(A), ib = pts.indexOf(B);
             const key = ia < ib ? ia + '_' + ib : ib + '_' + ia;
-            const ownerMeta = { prim: e.prim, isCurve: !!e.isCurve };
             if (!edgeOwner.has(key)) {
                 E.push([ia, ib]);
-                edgeOwner.set(key, ownerMeta);
+                edgeOwner.set(key, e.prim);
             }
             if (!edgesAtV.has(ia)) edgesAtV.set(ia, new Set());
             edgesAtV.get(ia).add(e.prim);
             if (!edgesAtV.has(ib)) edgesAtV.set(ib, new Set());
             edgesAtV.get(ib).add(e.prim);
-            edgeDir.set(ia + '->' + ib, { prim: e.prim, isCurve: !!e.isCurve, t0: e.t0, t1: e.t1, reversed: false });
-            edgeDir.set(ib + '->' + ia, { prim: e.prim, isCurve: !!e.isCurve, t0: e.t0, t1: e.t1, reversed: true });
         }
         if (!E.length) return makePlainGroup(leafIds);
 
@@ -330,7 +303,7 @@ function registerGrouping(ctx) {
         const ANG_EPS = 0.15; // ~8.6°
         function ownerOf(u, v) {
             const key = u < v ? u + '_' + v : v + '_' + u;
-            return edgeOwner.get(key)?.prim;
+            return edgeOwner.get(key);
         }
 
         function simplifyFaceIdx(idx) {
@@ -458,81 +431,14 @@ function registerGrouping(ctx) {
         }
         if (!uniq.length) return makePlainGroup(leafIds);
 
-        function splitQuadratic(p0, cp, p2, t) {
-            const p01 = lerpPt(p0, cp, t);
-            const p12 = lerpPt(cp, p2, t);
-            const p012 = lerpPt(p01, p12, t);
-            return {
-                left: { p0, cp: p01, p2: p012 },
-                right: { p0: p012, cp: p12, p2 }
-            };
-        }
-
-        function quadSegmentRange(p0, cp, p2, t0, t1) {
-            let seg = { p0, cp, p2 };
-            let start = Math.max(0, Math.min(1, t0));
-            let end = Math.max(0, Math.min(1, t1));
-            if (end < start) [start, end] = [end, start];
-            if (start > 0) {
-                const split = splitQuadratic(seg.p0, seg.cp, seg.p2, start);
-                seg = split.right;
-                const span = Math.max(1e-6, 1 - start);
-                end = (end - start) / span;
-            }
-            if (end < 1) {
-                const split = splitQuadratic(seg.p0, seg.cp, seg.p2, end);
-                seg = split.left;
-            }
-            return seg;
-        }
-
         // ---------- 6) Build shapes + delete source segments ----------
         api.pushHistory && api.pushHistory();
         const made = [];
         for (const f of uniq) {
             const pathOut = f.path.map(p => fromPx(p, srcNorm));
-            const segments = [];
-            const idxCycle = f.idx || [];
-            for (let i = 0; i < idxCycle.length; i++) {
-                const u = idxCycle[i];
-                const v = idxCycle[(i + 1) % idxCycle.length];
-                const key = u + '->' + v;
-                const meta = edgeDir.get(key);
-                const startPx = pts[u];
-                const endPx = pts[v];
-                if (meta && segMeta[meta.prim]) {
-                    const info = segMeta[meta.prim];
-                    if (meta.isCurve && info?.kind === 'quadratic') {
-                        const seg = quadSegmentRange(info.p1, info.cp, info.p2, meta.t0, meta.t1);
-                        let segOut = {
-                            kind: 'quadratic',
-                            p1: fromPx(seg.p0, srcNorm),
-                            cp: fromPx(seg.cp, srcNorm),
-                            p2: fromPx(seg.p2, srcNorm)
-                        };
-                        if (meta.reversed) {
-                            segOut = {
-                                kind: 'quadratic',
-                                p1: segOut.p2,
-                                cp: segOut.cp,
-                                p2: segOut.p1
-                            };
-                        }
-                        segments.push(segOut);
-                    } else {
-                        let p1Out = fromPx(startPx, srcNorm);
-                        let p2Out = fromPx(endPx, srcNorm);
-                        if (meta.reversed) [p1Out, p2Out] = [p2Out, p1Out];
-                        segments.push({ kind: 'line', p1: p1Out, p2: p2Out });
-                    }
-                } else {
-                    segments.push({ kind: 'line', p1: fromPx(startPx, srcNorm), p2: fromPx(endPx, srcNorm) });
-                }
-            }
             const shape = {
                 id: (typeof rndId === 'function') ? rndId('shape') : ('shape_' + Math.random().toString(36).slice(2)),
                 kind: 'shape', path: pathOut,
-                segments,
                 color: ui?.strokeColor?.value ?? '#fff',
                 width: +ui?.strokeWidth?.value || 1.5,
                 fill: ui?.fillColor?.value ?? 'transparent',
