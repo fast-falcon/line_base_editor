@@ -27,6 +27,102 @@ function registerFileSystem(ctx) {
         };
     }
 
+    function exportSummary() {
+        const { w, h } = api.getCSSSize ? api.getCSSSize() : { w: canvas.width, h: canvas.height };
+        const fmt = (p) => {
+            if (!p || typeof p.x !== 'number' || typeof p.y !== 'number') return null;
+            return { x: +(p.x / w).toFixed(3), y: +(p.y / h).toFixed(3) };
+        };
+
+        function summarizeShapeEdges(it) {
+            const segs = Array.isArray(it.segments) && it.segments.length
+                ? it.segments
+                : buildEdgesFromPath(it.path);
+            return segs.map(seg => {
+                if (!seg || !seg.p1 || !seg.p2) return null;
+                if (seg.kind === 'quadratic' && seg.cp) {
+                    return {
+                        kind: 'quadratic',
+                        p1: fmt(seg.p1),
+                        cp: fmt(seg.cp),
+                        p2: fmt(seg.p2)
+                    };
+                }
+                return {
+                    kind: 'line',
+                    p1: fmt(seg.p1),
+                    p2: fmt(seg.p2)
+                };
+            }).filter(Boolean);
+        }
+
+        function buildEdgesFromPath(path) {
+            if (!Array.isArray(path) || path.length < 2) return [];
+            const edges = [];
+            for (let i = 0; i < path.length; i++) {
+                const p1 = path[i];
+                const p2 = path[(i + 1) % path.length];
+                if (p1 && p2 && (p1.x !== p2.x || p1.y !== p2.y)) {
+                    edges.push({ kind: 'line', p1, p2 });
+                }
+            }
+            return edges;
+        }
+
+        const items = state.items.map(it => {
+            const base = {
+                id: it.id,
+                kind: it.kind,
+                color: it.color,
+                width: +it.width,
+                visible: it.visible !== false
+            };
+            if (it.kind === 'line') {
+                return {
+                    ...base,
+                    edges: [{ kind: 'line', p1: fmt(it.p1), p2: fmt(it.p2) }]
+                };
+            }
+            if (it.kind === 'quadratic') {
+                return {
+                    ...base,
+                    edges: [{ kind: 'quadratic', p1: fmt(it.p1), cp: fmt(it.cp), p2: fmt(it.p2) }]
+                };
+            }
+            if (it.kind === 'shape') {
+                return {
+                    ...base,
+                    fill: it.fill || null,
+                    edges: summarizeShapeEdges(it)
+                };
+            }
+            if (it.kind === 'group') {
+                return {
+                    ...base,
+                    children: Array.isArray(it.children) ? it.children.slice() : []
+                };
+            }
+            return base;
+        });
+
+        const animations = state.animations.map(a => ({
+            name: a.name,
+            duration: a.duration,
+            keyframes: a.keyframes.map(k => ({
+                t: k.t,
+                elements: k.snapshot.map(it => it.id)
+            }))
+        }));
+
+        return {
+            type: 'LinePackSummary',
+            version: 1,
+            size: { w, h },
+            items,
+            animations
+        };
+    }
+
     function serializeItem(it, w, h, min) {
         const base = {
             id: it.id,
@@ -130,8 +226,8 @@ function registerFileSystem(ctx) {
     }
 
     ui.saveJSON.addEventListener('click', () => {
-        const data = exportPack(false);
-        downloadBlob(JSON.stringify(data, null, 2), 'drawing.linepack.json');
+        const data = exportSummary();
+        downloadBlob(JSON.stringify(data, null, 2), 'drawing.summary.json');
     });
 
     ui.saveJSONMin.addEventListener('click', () => {
@@ -170,7 +266,7 @@ function registerFileSystem(ctx) {
         }
     });
 
-    const exposed = { exportPack, importPack, downloadBlob };
+    const exposed = { exportPack, importPack, downloadBlob, exportSummary };
     Object.assign(api, exposed);
     return { exposed };
 }
