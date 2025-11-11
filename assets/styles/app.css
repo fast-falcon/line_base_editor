@@ -38,9 +38,13 @@ body {
 /* ===== Toolbar ===== */
 .toolbar {
     flex: 0 0 auto;
+    position: sticky;
+    top: 0;
+    z-index: 40;
     background: linear-gradient(180deg, rgba(23, 26, 43, .95), rgba(23, 26, 43, .9));
     backdrop-filter: blur(6px);
     border-bottom: 1px solid #2a3056;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
     padding: 8px;
     display: grid;
     grid-template-columns: 1fr auto 1fr;
@@ -176,13 +180,16 @@ input[type=file] {
     flex-direction: column;
     flex: 1 1 auto;
     min-height: 0;
+    position: relative;
 }
 
 .content {
     flex: 1 1 auto;
     min-height: 0;
     display: grid;
-    grid-template-columns: 270px 1fr
+    grid-template-columns: 270px 1fr;
+    position: relative;
+    overflow: hidden
 }
 
 .sidebar {
@@ -190,9 +197,10 @@ input[type=file] {
     border-left: 1px solid #2a3056;
     display: flex;
     flex-direction: column;
-    min-height: 75%;
-    position: initial;
-    overflow-y: scroll;
+    min-height: 0;
+    position: relative;
+    z-index: 5;
+    overflow-y: auto;
     overflow-x: hidden;
 }
 ::-webkit-scrollbar {
@@ -381,7 +389,10 @@ input[type=file] {
 
 .stage-wrap {
     position: relative;
-    overflow: hidden
+    overflow: hidden;
+    background: radial-gradient(1200px 800px at 50% 30%, rgba(36, 40, 68, .55), rgba(15, 18, 32, .95));
+    border-left: 1px solid rgba(42, 48, 86, .6);
+    isolation: isolate
 }
 
 canvas {
@@ -391,7 +402,15 @@ canvas {
     height: 100%;
     display: block;
     background: transparent;
-    cursor: crosshair
+    cursor: crosshair;
+    z-index: 0
+}
+
+.stage-wrap .ghost,
+.stage-wrap .rot-h,
+.stage-wrap .scale-h,
+.stage-wrap .help {
+    z-index: 2;
 }
 
 .help {
