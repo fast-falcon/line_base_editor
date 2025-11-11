@@ -35,6 +35,240 @@ function clone(value) {
     return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 }
 
+const KIND_ALIASES = {
+    l: 'line',
+    line: 'line',
+    ln: 'line',
+    q: 'quadratic',
+    quad: 'quadratic',
+    quadratic: 'quadratic',
+    c: 'quadratic',
+    curve: 'quadratic',
+    s: 'shape',
+    sh: 'shape',
+    shape: 'shape',
+    g: 'group',
+    grp: 'group',
+    group: 'group'
+};
+
+function toPoint(value) {
+    if (value === null || value === undefined) return null;
+    if (Array.isArray(value)) {
+        if (value.length >= 2 && typeof value[0] !== 'object' && typeof value[1] !== 'object') {
+            const x = +value[0];
+            const y = +value[1];
+            if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+            return { x, y };
+        }
+        if (Array.isArray(value[0])) {
+            return toPoint(value[0]);
+        }
+        if (typeof value[0] === 'object') {
+            return toPoint(value[0]);
+        }
+        return null;
+    }
+    if (typeof value === 'object') {
+        const x = value.x ?? value[0];
+        const y = value.y ?? value[1];
+        if (x === undefined || y === undefined) return null;
+        const px = +x;
+        const py = +y;
+        if (!Number.isFinite(px) || !Number.isFinite(py)) return null;
+        return { x: px, y: py };
+    }
+    return null;
+}
+
+function expandPath(pathSource) {
+    if (!Array.isArray(pathSource)) return [];
+    if (!pathSource.length) return [];
+    if (typeof pathSource[0] === 'number') {
+        const out = [];
+        for (let i = 0; i < pathSource.length - 1; i += 2) {
+            const pt = toPoint([pathSource[i], pathSource[i + 1]]);
+            if (pt) out.push(pt);
+        }
+        return out;
+    }
+    return pathSource.map(pt => toPoint(pt)).filter(Boolean);
+}
+
+function expandCompactItem(entry) {
+    if (!entry) return null;
+    if (Array.isArray(entry)) {
+        const [id, kind, payload] = entry;
+        const obj = { i: id, k: kind };
+        if (payload !== undefined) obj.p = payload;
+        entry = obj;
+    }
+    if (typeof entry !== 'object') return null;
+    const id = entry.id ?? entry.i ?? entry.name ?? null;
+    if (!id) return null;
+    const kindRaw = entry.kind ?? entry.type ?? entry.k ?? 'line';
+    const kind = KIND_ALIASES[kindRaw] ?? kindRaw;
+    const base = { id, type: kind, kind };
+
+    const styleSource = typeof entry.style === 'object' && entry.style
+        ? { ...entry.style }
+        : {};
+    if ('c' in entry && styleSource.color === undefined) styleSource.color = entry.c;
+    if ('color' in entry && styleSource.color === undefined) styleSource.color = entry.color;
+    if ('w' in entry && styleSource.width === undefined) styleSource.width = entry.w;
+    if ('width' in entry && styleSource.width === undefined) styleSource.width = entry.width;
+    if ('r' in entry && styleSource.rot === undefined) styleSource.rot = entry.r;
+    if ('rot' in entry && styleSource.rot === undefined) styleSource.rot = entry.rot;
+    if ('rotation' in entry && styleSource.rot === undefined) styleSource.rot = entry.rotation;
+    if ('v' in entry && styleSource.visible === undefined) styleSource.visible = entry.v;
+    if ('visible' in entry && styleSource.visible === undefined) styleSource.visible = entry.visible;
+    const fillValue = entry.fill ?? entry.f ?? styleSource.fill;
+    if (fillValue !== undefined) {
+        base.fill = fillValue;
+        delete styleSource.fill;
+    }
+    if (styleSource.width !== undefined) {
+        const w = +styleSource.width;
+        styleSource.width = Number.isFinite(w) ? w : undefined;
+    }
+    if (styleSource.rot !== undefined) {
+        const r = +styleSource.rot;
+        styleSource.rot = Number.isFinite(r) ? r : undefined;
+    }
+    if (styleSource.visible !== undefined) {
+        styleSource.visible = !!styleSource.visible;
+    }
+    Object.keys(styleSource).forEach(key => {
+        if (styleSource[key] === undefined) delete styleSource[key];
+    });
+    if (Object.keys(styleSource).length) base.style = styleSource;
+
+    const points = entry.points ?? entry.p;
+    if (kind === 'line' || kind === 'quadratic') {
+        let start = entry.start ?? entry.s;
+        let end = entry.end ?? entry.e;
+        let control = entry.control ?? entry.cp ?? entry.ctrl ?? entry.q;
+        if ((!start || !end) && points) {
+            if (Array.isArray(points)) {
+                if (points.length >= 4 && typeof points[0] === 'number') {
+                    start = [points[0], points[1]];
+                    end = [points[2], points[3]];
+                    if (points.length >= 6) control = [points[4], points[5]];
+                } else if (points.length >= 2 && Array.isArray(points[0])) {
+                    start = points[0];
+                    end = points[1];
+                    if (points.length >= 3) control = points[2];
+                } else if (typeof points[0] === 'object') {
+                    start = points[0];
+                    end = points[1];
+                    if (points.length >= 3) control = points[2];
+                }
+            } else if (typeof points === 'object') {
+                start = points.p1 ?? points.start ?? points.a ?? start;
+                end = points.p2 ?? points.end ?? points.b ?? end;
+                control = points.cp ?? points.control ?? points.c ?? control;
+            }
+        }
+        const startPt = toPoint(start);
+        const endPt = toPoint(end);
+        if (startPt) base.start = startPt;
+        if (endPt) base.end = endPt;
+        if (kind === 'quadratic') {
+            const cp = toPoint(control);
+            if (cp) base.control = cp;
+        }
+    } else if (kind === 'shape') {
+        const path = expandPath(points ?? entry.path);
+        if (path.length) base.path = path;
+        if (Array.isArray(entry.segments)) base.segments = entry.segments;
+        if (Array.isArray(entry.children)) base.children = entry.children.slice();
+    } else if (kind === 'group') {
+        if (Array.isArray(entry.children)) base.children = entry.children.slice();
+    }
+    return base;
+}
+
+function expandCompactKeyframe(entry) {
+    if (!entry) return null;
+    if (Array.isArray(entry)) {
+        const [time, snapshot] = entry;
+        entry = { t: time, s: snapshot };
+    }
+    if (typeof entry !== 'object') return null;
+    const t = +(entry.t ?? entry.time ?? entry.sec ?? 0);
+    if (!Number.isFinite(t)) return null;
+    const snapshotSource = entry.snapshot ?? entry.s ?? entry.items ?? [];
+    const snapshot = Array.isArray(snapshotSource)
+        ? snapshotSource.map(expandCompactItem).filter(Boolean)
+        : [];
+    return { t, snapshot };
+}
+
+function expandCompactAnimation(entry) {
+    if (!entry) return null;
+    if (Array.isArray(entry)) {
+        const [id, name, duration, keyframes] = entry;
+        entry = { i: id, n: name, d: duration, k: keyframes };
+    }
+    if (typeof entry !== 'object') return null;
+    const id = entry.id ?? entry.i ?? null;
+    const name = entry.name ?? entry.n ?? id ?? 'Animation';
+    const duration = +(entry.duration ?? entry.d ?? 5);
+    const keyframesSource = entry.keyframes ?? entry.k ?? [];
+    const keyframes = Array.isArray(keyframesSource)
+        ? keyframesSource.map(expandCompactKeyframe).filter(Boolean)
+        : [];
+    return {
+        id: id ?? `anim_${Math.random().toString(36).slice(2, 8)}`,
+        name,
+        duration,
+        keyframes
+    };
+}
+
+function expandCompactPack(pack) {
+    if (!pack || typeof pack !== 'object') return pack;
+    if (pack.type) return pack;
+    if (!('t' in pack)) return pack;
+    const typeMap = {
+        LP: 'LinePack',
+        LinePack: 'LinePack',
+        LPS: 'LinePackSummary',
+        LinePackSummary: 'LinePackSummary'
+    };
+    const type = typeMap[pack.t] ?? pack.type ?? 'LinePack';
+    const sizeSource = pack.s ?? pack.size;
+    let size = { w: 512, h: 512 };
+    if (Array.isArray(sizeSource)) {
+        size = {
+            w: Number.isFinite(+sizeSource[0]) ? +sizeSource[0] : 512,
+            h: Number.isFinite(+sizeSource[1]) ? +sizeSource[1] : 512
+        };
+    } else if (typeof sizeSource === 'object' && sizeSource) {
+        const w = sizeSource.w ?? sizeSource.width ?? sizeSource[0];
+        const h = sizeSource.h ?? sizeSource.height ?? sizeSource[1];
+        size = {
+            w: Number.isFinite(+w) ? +w : 512,
+            h: Number.isFinite(+h) ? +h : 512
+        };
+    }
+    const elementsSource = pack.e ?? pack.elements ?? [];
+    const animationsSource = pack.a ?? pack.animations ?? [];
+    const elements = Array.isArray(elementsSource)
+        ? elementsSource.map(expandCompactItem).filter(Boolean)
+        : [];
+    const animations = Array.isArray(animationsSource)
+        ? animationsSource.map(expandCompactAnimation).filter(Boolean)
+        : [];
+    return {
+        type,
+        version: +(pack.v ?? pack.version ?? 2),
+        size,
+        elements,
+        animations
+    };
+}
+
 function denormPoint(point, size) {
     if (!point) return null;
     return {
@@ -386,10 +620,15 @@ class LinePackRenderer {
         if (!pack || typeof pack !== 'object') {
             throw new Error('Invalid pack data');
         }
-        if (pack.type === 'LinePack') {
-            this._loadFullPack(pack);
-        } else if (pack.type === 'LinePackSummary') {
-            this._loadSummaryPack(pack);
+        const normalizedPack = expandCompactPack(pack);
+        const data = normalizedPack || pack;
+        if (!data || typeof data !== 'object') {
+            throw new Error('Invalid pack data');
+        }
+        if (data.type === 'LinePack') {
+            this._loadFullPack(data);
+        } else if (data.type === 'LinePackSummary') {
+            this._loadSummaryPack(data);
         } else {
             throw new Error('Unsupported pack type');
         }
