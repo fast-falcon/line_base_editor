@@ -115,6 +115,76 @@ function registerFileSystem(ctx) {
         y: matrix[1] * pt.x + matrix[3] * pt.y + matrix[5]
     });
 
+    const distanceBetween = (a, b) => {
+        if (!a || !b) return Infinity;
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        return Math.hypot(dx, dy);
+    };
+
+    const approximateCubicSegment = (p0, p1, p2, p3) => {
+        const lengthEstimate = distanceBetween(p0, p1)
+            + distanceBetween(p1, p2)
+            + distanceBetween(p2, p3);
+        const steps = Math.max(4, Math.min(32, Math.ceil(lengthEstimate / 25)));
+        const points = [];
+        for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            const inv = 1 - t;
+            const inv2 = inv * inv;
+            const inv3 = inv2 * inv;
+            const t2 = t * t;
+            const t3 = t2 * t;
+            const x = inv3 * p0.x
+                + 3 * inv2 * t * p1.x
+                + 3 * inv * t2 * p2.x
+                + t3 * p3.x;
+            const y = inv3 * p0.y
+                + 3 * inv2 * t * p1.y
+                + 3 * inv * t2 * p2.y
+                + t3 * p3.y;
+            points.push({ x, y });
+        }
+        return points;
+    };
+
+    const buildGeometryFromPoints = (localPoints, matrix, closed = true) => {
+        if (!Array.isArray(localPoints) || localPoints.length < 2) return null;
+        const worldPoints = [];
+        const segments = [];
+
+        const pushWorldPoint = (pt) => {
+            if (!pt) return null;
+            const world = applyMatrixPoint(matrix, pt);
+            const last = worldPoints[worldPoints.length - 1];
+            if (!last || distanceBetween(last, world) > EPSILON) {
+                worldPoints.push({ x: world.x, y: world.y });
+            }
+            return worldPoints[worldPoints.length - 1];
+        };
+
+        let previous = null;
+        localPoints.forEach((pt, idx) => {
+            const world = pushWorldPoint(pt);
+            if (!world) return;
+            if (previous && distanceBetween(previous, world) > EPSILON) {
+                segments.push({ kind: 'line', p1: { x: previous.x, y: previous.y }, p2: { x: world.x, y: world.y } });
+            }
+            previous = world;
+        });
+
+        if (closed && worldPoints.length > 1) {
+            const first = worldPoints[0];
+            const last = worldPoints[worldPoints.length - 1];
+            if (distanceBetween(first, last) > EPSILON) {
+                segments.push({ kind: 'line', p1: { x: last.x, y: last.y }, p2: { x: first.x, y: first.y } });
+                worldPoints.push({ x: first.x, y: first.y });
+            }
+        }
+
+        return { points: worldPoints, segments, closed };
+    };
+
     const staticValue = (prop) => {
         if (prop === null || prop === undefined) return null;
         if (typeof prop === 'object') {
@@ -327,6 +397,214 @@ function registerFileSystem(ctx) {
         return false;
     };
 
+    const resolvePathValue = (raw) => {
+        if (!raw) return null;
+        let pathValue = staticValue(raw);
+        if ((!pathValue || !pathValue.v) && Array.isArray(raw.k) && raw.k.length) {
+            const first = raw.k[0];
+            if (first && typeof first === 'object') {
+                const source = Array.isArray(first.s) ? first.s[0] : first.s;
+                if (source && source.v) pathValue = source;
+            }
+        }
+        if (!pathValue || !Array.isArray(pathValue.v)) return null;
+        return pathValue;
+    };
+
+    const geometryFromPathValue = (pathValue, matrix) => {
+        if (!pathValue) return null;
+        const vertices = Array.isArray(pathValue.v) ? pathValue.v : [];
+        const count = vertices.length;
+        if (count < 2) return null;
+        const inTangents = Array.isArray(pathValue.i) ? pathValue.i : [];
+        const outTangents = Array.isArray(pathValue.o) ? pathValue.o : [];
+        const closed = !!pathValue.c;
+        const segments = [];
+        const worldPoints = [];
+
+        const appendPoint = (pt) => {
+            if (!pt) return null;
+            const last = worldPoints[worldPoints.length - 1];
+            if (!last || distanceBetween(last, pt) > EPSILON) {
+                worldPoints.push({ x: pt.x, y: pt.y });
+            }
+            return worldPoints[worldPoints.length - 1];
+        };
+
+        const totalSegments = closed ? count : count - 1;
+        for (let idx = 0; idx < totalSegments; idx++) {
+            const nextIndex = (idx + 1) % count;
+            const anchor = pointFrom(vertices[idx]);
+            const nextAnchor = pointFrom(vertices[nextIndex]);
+            if (!anchor || !nextAnchor) continue;
+            const inTanRaw = pointFrom(inTangents[nextIndex]);
+            const outTanRaw = pointFrom(outTangents[idx]);
+            const startWorld = applyMatrixPoint(matrix, anchor);
+            const endWorld = applyMatrixPoint(matrix, nextAnchor);
+            const cp1Local = { x: anchor.x + outTanRaw.x, y: anchor.y + outTanRaw.y };
+            const cp2Local = { x: nextAnchor.x + inTanRaw.x, y: nextAnchor.y + inTanRaw.y };
+            const cp1World = applyMatrixPoint(matrix, cp1Local);
+            const cp2World = applyMatrixPoint(matrix, cp2Local);
+            appendPoint(startWorld);
+
+            const isCurve = distanceBetween(startWorld, cp1World) > EPSILON
+                || distanceBetween(endWorld, cp2World) > EPSILON;
+
+            if (isCurve) {
+                const samples = approximateCubicSegment(startWorld, cp1World, cp2World, endWorld);
+                for (let i = 1; i < samples.length; i++) {
+                    const prev = samples[i - 1];
+                    const curr = samples[i];
+                    if (distanceBetween(prev, curr) <= EPSILON) continue;
+                    segments.push({ kind: 'line', p1: { x: prev.x, y: prev.y }, p2: { x: curr.x, y: curr.y } });
+                    appendPoint(curr);
+                }
+            } else {
+                if (distanceBetween(startWorld, endWorld) > EPSILON) {
+                    segments.push({ kind: 'line', p1: { x: startWorld.x, y: startWorld.y }, p2: { x: endWorld.x, y: endWorld.y } });
+                    appendPoint(endWorld);
+                }
+            }
+        }
+
+        return worldPoints.length >= 2 ? { points: worldPoints, segments, closed } : null;
+    };
+
+    const geometryFromRectangle = (entry, matrix) => {
+        const size = pointFrom(entry.s);
+        const position = pointFrom(entry.p);
+        if (!size || !position) return null;
+        const width = Number.isFinite(+size.x) ? +size.x : 0;
+        const height = Number.isFinite(+size.y) ? +size.y : 0;
+        if (Math.abs(width) <= EPSILON || Math.abs(height) <= EPSILON) return null;
+        const halfW = width / 2;
+        const halfH = height / 2;
+        const radiusRaw = Math.abs(numberFrom(entry.r, 0));
+        const radius = Math.min(radiusRaw, Math.abs(halfW), Math.abs(halfH));
+        const localPoints = [];
+
+        const pushPoint = (pt) => {
+            if (!pt) return;
+            const last = localPoints[localPoints.length - 1];
+            if (!last || distanceBetween(last, pt) > EPSILON) {
+                localPoints.push({ x: pt.x, y: pt.y });
+            }
+        };
+
+        if (radius <= EPSILON) {
+            pushPoint({ x: position.x + halfW, y: position.y - halfH });
+            pushPoint({ x: position.x + halfW, y: position.y + halfH });
+            pushPoint({ x: position.x - halfW, y: position.y + halfH });
+            pushPoint({ x: position.x - halfW, y: position.y - halfH });
+            return buildGeometryFromPoints(localPoints, matrix, true);
+        }
+
+        const cornerCenters = [
+            { cx: position.x + halfW - radius, cy: position.y - halfH + radius, start: -Math.PI / 2, end: 0 },
+            { cx: position.x + halfW - radius, cy: position.y + halfH - radius, start: 0, end: Math.PI / 2 },
+            { cx: position.x - halfW + radius, cy: position.y + halfH - radius, start: Math.PI / 2, end: Math.PI },
+            { cx: position.x - halfW + radius, cy: position.y - halfH + radius, start: Math.PI, end: 3 * Math.PI / 2 }
+        ];
+
+        const pushArc = (center, startAngle, endAngle, includeStart) => {
+            const sweep = endAngle - startAngle;
+            const steps = Math.max(4, Math.ceil(Math.abs(sweep) * radius / 12));
+            for (let i = 0; i <= steps; i++) {
+                if (!includeStart && i === 0) continue;
+                const t = i / steps;
+                const angle = startAngle + sweep * t;
+                pushPoint({
+                    x: center.cx + Math.cos(angle) * radius,
+                    y: center.cy + Math.sin(angle) * radius
+                });
+            }
+        };
+
+        const pushLine = (from, to) => {
+            pushPoint(from);
+            pushPoint(to);
+        };
+
+        const topRightStart = { x: position.x + halfW - radius, y: position.y - halfH };
+        pushPoint(topRightStart);
+        pushArc(cornerCenters[0], cornerCenters[0].start, cornerCenters[0].end, false);
+        pushLine({ x: position.x + halfW, y: position.y - halfH + radius }, { x: position.x + halfW, y: position.y + halfH - radius });
+        pushArc(cornerCenters[1], cornerCenters[1].start, cornerCenters[1].end, false);
+        pushLine({ x: position.x + halfW - radius, y: position.y + halfH }, { x: position.x - halfW + radius, y: position.y + halfH });
+        pushArc(cornerCenters[2], cornerCenters[2].start, cornerCenters[2].end, false);
+        pushLine({ x: position.x - halfW, y: position.y + halfH - radius }, { x: position.x - halfW, y: position.y - halfH + radius });
+        pushArc(cornerCenters[3], cornerCenters[3].start, cornerCenters[3].end, false);
+        pushLine({ x: position.x - halfW + radius, y: position.y - halfH }, topRightStart);
+
+        if (entry.d === 3 || entry.d === -1) localPoints.reverse();
+
+        return buildGeometryFromPoints(localPoints, matrix, true);
+    };
+
+    const geometryFromEllipse = (entry, matrix) => {
+        const size = pointFrom(entry.s);
+        const position = pointFrom(entry.p);
+        if (!size || !position) return null;
+        const width = Number.isFinite(+size.x) ? +size.x : 0;
+        const height = Number.isFinite(+size.y) ? +size.y : 0;
+        if (Math.abs(width) <= EPSILON || Math.abs(height) <= EPSILON) return null;
+        const steps = Math.max(24, Math.ceil(Math.max(Math.abs(width), Math.abs(height)) / 12));
+        const localPoints = [];
+        const dir = (entry.d === 3 || entry.d === -1) ? -1 : 1;
+        for (let i = 0; i < steps; i++) {
+            const t = i / steps;
+            const angle = -Math.PI / 2 + dir * t * Math.PI * 2;
+            const x = position.x + Math.cos(angle) * (width / 2);
+            const y = position.y + Math.sin(angle) * (height / 2);
+            localPoints.push({ x, y });
+        }
+        if (dir < 0) localPoints.reverse();
+        return buildGeometryFromPoints(localPoints, matrix, true);
+    };
+
+    const geometryFromPolystar = (entry, matrix) => {
+        const position = pointFrom(entry.p);
+        if (!position) return null;
+        const pointCount = Math.max(3, Math.round(numberFrom(entry.pt, 5)));
+        const outerRadius = Math.abs(numberFrom(entry.or, numberFrom(entry.r, 0)));
+        if (!Number.isFinite(outerRadius) || outerRadius <= EPSILON) return null;
+        const innerRadiusRaw = numberFrom(entry.ir, outerRadius / 2);
+        const type = entry.sy === 2 ? 'polygon' : 'star';
+        const isStar = type === 'star' && Number.isFinite(innerRadiusRaw) && innerRadiusRaw > EPSILON;
+        const innerRadius = isStar ? Math.min(Math.abs(innerRadiusRaw), Math.abs(outerRadius)) : outerRadius;
+        const totalPoints = isStar ? pointCount * 2 : pointCount;
+        const rotationDeg = numberFrom(entry.r, 0);
+        const rotation = (rotationDeg - 90) * Math.PI / 180;
+        const dir = (entry.d === 3 || entry.d === -1) ? -1 : 1;
+        const localPoints = [];
+        for (let i = 0; i < totalPoints; i++) {
+            const angle = rotation + dir * (i / totalPoints) * Math.PI * 2;
+            const radius = isStar && (i % 2 === 1) ? innerRadius : outerRadius;
+            const x = position.x + Math.cos(angle) * radius;
+            const y = position.y + Math.sin(angle) * radius;
+            localPoints.push({ x, y });
+        }
+        return buildGeometryFromPoints(localPoints, matrix, true);
+    };
+
+    const buildShapeGeometry = (entry, matrix) => {
+        if (!entry) return null;
+        if (entry.ty === 'sh') {
+            const pathValue = resolvePathValue(entry.ks);
+            return geometryFromPathValue(pathValue, matrix);
+        }
+        if (entry.ty === 'rc') {
+            return geometryFromRectangle(entry, matrix);
+        }
+        if (entry.ty === 'el') {
+            return geometryFromEllipse(entry, matrix);
+        }
+        if (entry.ty === 'sr') {
+            return geometryFromPolystar(entry, matrix);
+        }
+        return null;
+    };
+
     const convertLottieToPack = (data) => {
         const width = Number.isFinite(+data.w) && +data.w > 0 ? +data.w : 512;
         const height = Number.isFinite(+data.h) && +data.h > 0 ? +data.h : 512;
@@ -401,48 +679,16 @@ function registerFileSystem(ctx) {
         const pushShape = (shapeNode, state, layerName) => {
             if (!shapeNode || typeof shapeNode !== 'object') return;
             if (shapeNode.hd) return;
-            const raw = shapeNode.ks;
-            if (!raw) return;
-            let pathValue = staticValue(raw);
-            if ((!pathValue || !pathValue.v) && Array.isArray(raw.k) && raw.k.length) {
-                const first = raw.k[0];
-                if (first && typeof first === 'object') {
-                    const source = Array.isArray(first.s) ? first.s[0] : first.s;
-                    if (source && source.v) pathValue = source;
-                }
-            }
-            if (!pathValue || !Array.isArray(pathValue.v)) return;
-            const verts = pathValue.v.map(pt => toPoint(pt)).filter(Boolean);
-            if (verts.length < 2) return;
-            const worldPoints = verts.map(pt => applyMatrixPoint(state.transform, pt));
-            worldPoints.forEach(updateBounds);
-            const segments = [];
-            for (let i = 0; i < worldPoints.length - 1; i++) {
-                const p1 = worldPoints[i];
-                const p2 = worldPoints[i + 1];
-                if (!p1 || !p2) continue;
-                segments.push({
-                    kind: 'line',
-                    p1: { ...p1 },
-                    p2: { ...p2 }
-                });
-            }
-            if (pathValue.c && worldPoints.length > 1) {
-                const last = worldPoints[worldPoints.length - 1];
-                const first = worldPoints[0];
-                segments.push({
-                    kind: 'line',
-                    p1: { ...last },
-                    p2: { ...first }
-                });
-            }
+            const geometry = buildShapeGeometry(shapeNode, state.transform);
+            if (!geometry || !Array.isArray(geometry.points) || geometry.points.length < 2) return;
+            geometry.points.forEach(updateBounds);
             pendingGeometry.push({
-                points: worldPoints,
-                closed: !!pathValue.c,
-                segments,
+                points: geometry.points,
+                closed: geometry.closed !== false,
+                segments: Array.isArray(geometry.segments) ? geometry.segments : [],
                 strokeColor: state.strokeColor || DEFAULT_STROKE_COLOR,
                 strokeWidth: Number.isFinite(+state.strokeWidth) ? Math.max(0, +state.strokeWidth) : 0,
-                fill: state.fill,
+                fill: geometry.closed === false ? null : state.fill,
                 layerName
             });
         };
@@ -502,7 +748,7 @@ function registerFileSystem(ctx) {
                     state.fill = opacity <= 0 ? null : gradientToColor(entry, state.fill || DEFAULT_STROKE_COLOR, opacity);
                     return;
                 }
-                if (entry.ty === 'sh') {
+                if (entry.ty === 'sh' || entry.ty === 'rc' || entry.ty === 'el' || entry.ty === 'sr') {
                     pushShape(entry, state, layerName);
                 }
             });
@@ -541,8 +787,23 @@ function registerFileSystem(ctx) {
         });
 
         pendingGeometry.forEach(geo => {
-            const stagePoints = geo.points.map(toStagePoint).filter(Boolean);
-            if (!stagePoints.length) return;
+            const stagePoints = [];
+            geo.points.forEach(pt => {
+                const stage = toStagePoint(pt);
+                if (!stage) return;
+                const last = stagePoints[stagePoints.length - 1];
+                if (!last || distanceBetween(last, stage) > EPSILON) {
+                    stagePoints.push({ x: stage.x, y: stage.y });
+                }
+            });
+            if (geo.closed && stagePoints.length > 1) {
+                const first = stagePoints[0];
+                const last = stagePoints[stagePoints.length - 1];
+                if (distanceBetween(first, last) > EPSILON) {
+                    stagePoints.push({ x: first.x, y: first.y });
+                }
+            }
+            if (stagePoints.length < 2) return;
             const path = stagePoints.map(pt => ({
                 x: norm(pt.x, targetWidth),
                 y: norm(pt.y, targetHeight)
@@ -557,7 +818,7 @@ function registerFileSystem(ctx) {
                 path,
                 visible: true
             };
-            if (geo.fill) element.fill = geo.fill;
+            if (geo.fill && geo.closed !== false) element.fill = geo.fill;
             const segmentEntries = Array.isArray(geo.segments) ? geo.segments : [];
             if (segmentEntries.length) {
                 const mappedSegments = segmentEntries.map(seg => {
@@ -565,6 +826,7 @@ function registerFileSystem(ctx) {
                     const stageP1 = toStagePoint(seg.p1);
                     const stageP2 = toStagePoint(seg.p2);
                     if (!stageP1 || !stageP2) return null;
+                    if (distanceBetween(stageP1, stageP2) <= EPSILON) return null;
                     const result = {
                         kind: seg.kind === 'quadratic' ? 'quadratic' : 'line',
                         p1: { x: norm(stageP1.x, targetWidth), y: norm(stageP1.y, targetHeight) },
