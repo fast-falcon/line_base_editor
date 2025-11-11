@@ -210,6 +210,101 @@ function registerFileSystem(ctx) {
         return fallback;
     };
 
+    const colorWithAlpha = (color, alpha) => {
+        const normalizedAlpha = Number.isFinite(alpha) ? Math.max(0, Math.min(1, alpha)) : 1;
+        if (normalizedAlpha >= 0.999) return color;
+        if (typeof color !== 'string') return color;
+        const hexMatch = /^#?([0-9a-f]{6})$/i.exec(color.trim());
+        if (!hexMatch) return color;
+        const hex = hexMatch[1];
+        const r = parseInt(hex.slice(0, 2), 16);
+        const g = parseInt(hex.slice(2, 4), 16);
+        const b = parseInt(hex.slice(4, 6), 16);
+        const rounded = +(normalizedAlpha.toFixed(PRECISION));
+        return `rgba(${r},${g},${b},${rounded})`;
+    };
+
+    const gradientStopsFrom = (entry) => {
+        if (!entry || typeof entry !== 'object') return [];
+        const gradient = entry.g || entry;
+        if (!gradient) return [];
+        const rawValue = gradient.k;
+        let stopsArray = staticValue(rawValue);
+        if (!Array.isArray(stopsArray) && rawValue && typeof rawValue === 'object') {
+            stopsArray = staticValue(rawValue.k);
+        }
+        if (!Array.isArray(stopsArray)) return [];
+        const pointCount = Number.isFinite(+gradient.p) ? +gradient.p : Math.floor(stopsArray.length / 4);
+        const colorStops = [];
+        for (let i = 0; i < pointCount; i++) {
+            const idx = i * 4;
+            if (idx + 3 >= stopsArray.length) break;
+            const pos = Number.isFinite(+stopsArray[idx]) ? +stopsArray[idx] : i;
+            const r = stopsArray[idx + 1];
+            const g = stopsArray[idx + 2];
+            const b = stopsArray[idx + 3];
+            const color = colorFrom([r, g, b], null);
+            if (!color) continue;
+            colorStops.push({ pos, color, alpha: 1 });
+        }
+        if (!colorStops.length) return [];
+        const alphaStops = [];
+        const alphaStart = pointCount * 4;
+        for (let i = alphaStart; i + 1 < stopsArray.length; i += 2) {
+            const pos = Number.isFinite(+stopsArray[i]) ? +stopsArray[i] : null;
+            let alpha = stopsArray[i + 1];
+            if (!Number.isFinite(+alpha)) continue;
+            alpha = +alpha;
+            if (alpha > 1) alpha = alpha > 100 ? alpha / 255 : alpha / 100;
+            alpha = Math.max(0, Math.min(1, alpha));
+            alphaStops.push({ pos, alpha });
+        }
+        if (!alphaStops.length) return colorStops;
+        return colorStops.map(stop => {
+            let closest = stop.alpha;
+            let bestDist = Infinity;
+            alphaStops.forEach(entry => {
+                const entryAlpha = Number.isFinite(entry.alpha) ? entry.alpha : 1;
+                const entryPos = Number.isFinite(entry.pos) ? entry.pos : stop.pos;
+                const distance = Number.isFinite(entryPos) && Number.isFinite(stop.pos)
+                    ? Math.abs(entryPos - stop.pos)
+                    : 0;
+                if (distance < bestDist) {
+                    bestDist = distance;
+                    closest = entryAlpha;
+                }
+            });
+            return { ...stop, alpha: closest };
+        });
+    };
+
+    const gradientToColor = (entry, fallback = DEFAULT_STROKE_COLOR, opacityMultiplier = 1) => {
+        const stops = gradientStopsFrom(entry);
+        if (!stops.length) return colorWithAlpha(fallback, opacityMultiplier);
+        let chosen = null;
+        stops.forEach(stop => {
+            if (!stop.color) return;
+            const alpha = Number.isFinite(stop.alpha) ? Math.max(0, Math.min(1, stop.alpha)) : 1;
+            if (!chosen) {
+                chosen = { ...stop, alpha };
+                return;
+            }
+            const chosenAlpha = Number.isFinite(chosen.alpha) ? chosen.alpha : 1;
+            if (alpha > chosenAlpha + EPSILON) {
+                chosen = { ...stop, alpha };
+                return;
+            }
+            if (Math.abs(alpha - chosenAlpha) <= EPSILON && stop.pos > chosen.pos) {
+                chosen = { ...stop, alpha };
+            }
+        });
+        if (!chosen) return colorWithAlpha(fallback, opacityMultiplier);
+        const baseAlpha = Number.isFinite(chosen.alpha) ? Math.max(0, Math.min(1, chosen.alpha)) : 1;
+        const extra = Number.isFinite(opacityMultiplier) ? Math.max(0, Math.min(1, opacityMultiplier)) : 1;
+        const finalAlpha = baseAlpha * extra;
+        return colorWithAlpha(chosen.color, finalAlpha);
+    };
+
     const matrixFromTransform = (entry) => {
         if (!entry || typeof entry !== 'object') return identityMatrix();
         const anchor = pointFrom(entry.a);
@@ -259,14 +354,6 @@ function registerFileSystem(ctx) {
         );
         if (!Number.isFinite(uniformScale) || uniformScale <= 0) uniformScale = 1;
 
-        const offsetX = (targetWidth - width * uniformScale) / 2;
-        const offsetY = (targetHeight - height * uniformScale) / 2;
-
-        const toStagePoint = (pt) => ({
-            x: pt.x * uniformScale + offsetX,
-            y: pt.y * uniformScale + offsetY
-        });
-
         const transformCache = new Map();
         const layerWorldMatrix = (layer) => {
             if (!layer) return identityMatrix();
@@ -295,6 +382,21 @@ function registerFileSystem(ctx) {
         });
 
         const items = [];
+        const pendingGeometry = [];
+        const bounds = {
+            minX: Infinity,
+            minY: Infinity,
+            maxX: -Infinity,
+            maxY: -Infinity
+        };
+
+        const updateBounds = (pt) => {
+            if (!pt || !Number.isFinite(pt.x) || !Number.isFinite(pt.y)) return;
+            bounds.minX = Math.min(bounds.minX, pt.x);
+            bounds.minY = Math.min(bounds.minY, pt.y);
+            bounds.maxX = Math.max(bounds.maxX, pt.x);
+            bounds.maxY = Math.max(bounds.maxY, pt.y);
+        };
 
         const pushShape = (shapeNode, state, layerName) => {
             if (!shapeNode || typeof shapeNode !== 'object') return;
@@ -312,44 +414,37 @@ function registerFileSystem(ctx) {
             if (!pathValue || !Array.isArray(pathValue.v)) return;
             const verts = pathValue.v.map(pt => toPoint(pt)).filter(Boolean);
             if (verts.length < 2) return;
-            const transformed = verts.map(pt => toStagePoint(applyMatrixPoint(state.transform, pt)));
-            const path = transformed.map(pt => ({ x: norm(pt.x, targetWidth), y: norm(pt.y, targetHeight) }));
+            const worldPoints = verts.map(pt => applyMatrixPoint(state.transform, pt));
+            worldPoints.forEach(updateBounds);
             const segments = [];
-            for (let i = 0; i < transformed.length - 1; i++) {
-                const p1 = transformed[i];
-                const p2 = transformed[i + 1];
+            for (let i = 0; i < worldPoints.length - 1; i++) {
+                const p1 = worldPoints[i];
+                const p2 = worldPoints[i + 1];
                 if (!p1 || !p2) continue;
                 segments.push({
                     kind: 'line',
-                    p1: { x: norm(p1.x, targetWidth), y: norm(p1.y, targetHeight) },
-                    p2: { x: norm(p2.x, targetWidth), y: norm(p2.y, targetHeight) }
+                    p1: { ...p1 },
+                    p2: { ...p2 }
                 });
             }
-            if (pathValue.c && transformed.length > 1) {
-                const last = transformed[transformed.length - 1];
-                const first = transformed[0];
+            if (pathValue.c && worldPoints.length > 1) {
+                const last = worldPoints[worldPoints.length - 1];
+                const first = worldPoints[0];
                 segments.push({
                     kind: 'line',
-                    p1: { x: norm(last.x, targetWidth), y: norm(last.y, targetHeight) },
-                    p2: { x: norm(first.x, targetWidth), y: norm(first.y, targetHeight) }
+                    p1: { ...last },
+                    p2: { ...first }
                 });
             }
-            const strokeWidth = Number.isFinite(+state.strokeWidth)
-                ? Math.max(0, +state.strokeWidth * uniformScale)
-                : 0;
-            const element = {
-                id: rndId('lt'),
-                type: 'shape',
-                kind: 'shape',
-                color: state.strokeColor || DEFAULT_STROKE_COLOR,
-                width: strokeWidth,
-                path,
-                visible: true
-            };
-            if (segments.length) element.segments = segments;
-            if (state.fill) element.fill = state.fill;
-            if (layerName) element.name = layerName;
-            items.push(element);
+            pendingGeometry.push({
+                points: worldPoints,
+                closed: !!pathValue.c,
+                segments,
+                strokeColor: state.strokeColor || DEFAULT_STROKE_COLOR,
+                strokeWidth: Number.isFinite(+state.strokeWidth) ? Math.max(0, +state.strokeWidth) : 0,
+                fill: state.fill,
+                layerName
+            });
         };
 
         const parseGroup = (entries, incomingState, layerName) => {
@@ -375,7 +470,19 @@ function registerFileSystem(ctx) {
                     if (opacity <= 0) {
                         state.strokeWidth = 0;
                     } else {
-                        state.strokeColor = colorFrom(entry.c, state.strokeColor || DEFAULT_STROKE_COLOR);
+                        const strokeColor = colorFrom(entry.c, state.strokeColor || DEFAULT_STROKE_COLOR);
+                        state.strokeColor = colorWithAlpha(strokeColor, opacity);
+                        const width = numberFrom(entry.w, state.strokeWidth);
+                        if (Number.isFinite(width)) state.strokeWidth = Math.max(0, width);
+                    }
+                    return;
+                }
+                if (entry.ty === 'gs') {
+                    const opacity = opacityFrom(entry.o);
+                    if (opacity <= 0) {
+                        state.strokeWidth = 0;
+                    } else {
+                        state.strokeColor = gradientToColor(entry, state.strokeColor || DEFAULT_STROKE_COLOR, opacity);
                         const width = numberFrom(entry.w, state.strokeWidth);
                         if (Number.isFinite(width)) state.strokeWidth = Math.max(0, width);
                     }
@@ -383,7 +490,16 @@ function registerFileSystem(ctx) {
                 }
                 if (entry.ty === 'fl') {
                     const opacity = opacityFrom(entry.o);
-                    state.fill = opacity <= 0 ? null : colorFrom(entry.c, state.fill || DEFAULT_STROKE_COLOR);
+                    if (opacity <= 0) state.fill = null;
+                    else {
+                        const fillColor = colorFrom(entry.c, state.fill || DEFAULT_STROKE_COLOR);
+                        state.fill = colorWithAlpha(fillColor, opacity);
+                    }
+                    return;
+                }
+                if (entry.ty === 'gf') {
+                    const opacity = opacityFrom(entry.o);
+                    state.fill = opacity <= 0 ? null : gradientToColor(entry, state.fill || DEFAULT_STROKE_COLOR, opacity);
                     return;
                 }
                 if (entry.ty === 'sh') {
@@ -405,6 +521,67 @@ function registerFileSystem(ctx) {
                 fill: null
             };
             parseGroup(layer.shapes || [], baseState, layer.nm);
+        });
+
+        const hasBounds = Number.isFinite(bounds.minX) && Number.isFinite(bounds.minY)
+            && Number.isFinite(bounds.maxX) && Number.isFinite(bounds.maxY);
+
+        let offsetX = (targetWidth - width * uniformScale) / 2;
+        let offsetY = (targetHeight - height * uniformScale) / 2;
+        if (hasBounds) {
+            const centerX = (bounds.minX + bounds.maxX) / 2;
+            const centerY = (bounds.minY + bounds.maxY) / 2;
+            offsetX = targetWidth / 2 - centerX * uniformScale;
+            offsetY = targetHeight / 2 - centerY * uniformScale;
+        }
+
+        const toStagePoint = (pt) => ({
+            x: pt.x * uniformScale + offsetX,
+            y: pt.y * uniformScale + offsetY
+        });
+
+        pendingGeometry.forEach(geo => {
+            const stagePoints = geo.points.map(toStagePoint).filter(Boolean);
+            if (!stagePoints.length) return;
+            const path = stagePoints.map(pt => ({
+                x: norm(pt.x, targetWidth),
+                y: norm(pt.y, targetHeight)
+            }));
+            const scaledStroke = geo.strokeWidth * uniformScale;
+            const element = {
+                id: rndId('lt'),
+                type: 'shape',
+                kind: 'shape',
+                color: geo.strokeColor,
+                width: Number.isFinite(scaledStroke) ? Math.max(0, scaledStroke) : 0,
+                path,
+                visible: true
+            };
+            if (geo.fill) element.fill = geo.fill;
+            const segmentEntries = Array.isArray(geo.segments) ? geo.segments : [];
+            if (segmentEntries.length) {
+                const mappedSegments = segmentEntries.map(seg => {
+                    if (!seg || !seg.p1 || !seg.p2) return null;
+                    const stageP1 = toStagePoint(seg.p1);
+                    const stageP2 = toStagePoint(seg.p2);
+                    if (!stageP1 || !stageP2) return null;
+                    const result = {
+                        kind: seg.kind === 'quadratic' ? 'quadratic' : 'line',
+                        p1: { x: norm(stageP1.x, targetWidth), y: norm(stageP1.y, targetHeight) },
+                        p2: { x: norm(stageP2.x, targetWidth), y: norm(stageP2.y, targetHeight) }
+                    };
+                    if (seg.kind === 'quadratic' && seg.cp) {
+                        const stageCP = toStagePoint(seg.cp);
+                        if (stageCP) {
+                            result.cp = { x: norm(stageCP.x, targetWidth), y: norm(stageCP.y, targetHeight) };
+                        }
+                    }
+                    return result;
+                }).filter(Boolean);
+                if (mappedSegments.length) element.segments = mappedSegments;
+            }
+            if (geo.layerName) element.name = geo.layerName;
+            items.push(element);
         });
 
         return {
