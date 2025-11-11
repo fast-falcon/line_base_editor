@@ -81,6 +81,58 @@ function registerFileSystem(ctx) {
 
     const DEFAULT_STROKE_COLOR = '#ffffff';
 
+    const clampByte = (val) => {
+        if (!Number.isFinite(val)) return 0;
+        return Math.max(0, Math.min(255, Math.round(val)));
+    };
+
+    const byteToHex = (val) => clampByte(val).toString(16).padStart(2, '0');
+
+    const parseColorString = (color) => {
+        if (!color || typeof color !== 'string') return null;
+        const trimmed = color.trim();
+        const hexMatch = /^#?([0-9a-f]{6})$/i.exec(trimmed);
+        if (hexMatch) {
+            const hex = hexMatch[1];
+            return {
+                r: parseInt(hex.slice(0, 2), 16),
+                g: parseInt(hex.slice(2, 4), 16),
+                b: parseInt(hex.slice(4, 6), 16),
+                a: 1
+            };
+        }
+        const rgbaMatch = /^rgba?\(([^)]+)\)$/i.exec(trimmed);
+        if (rgbaMatch) {
+            const parts = rgbaMatch[1].split(',').map(p => p.trim());
+            if (parts.length < 3) return null;
+            const parseChannel = (entry) => {
+                if (!entry) return null;
+                const percent = entry.endsWith('%');
+                const num = parseFloat(entry);
+                if (!Number.isFinite(num)) return null;
+                return percent ? clampByte(num * 2.55) : clampByte(num);
+            };
+            const parseAlpha = (entry) => {
+                if (entry === undefined) return 1;
+                const trimmedEntry = entry.trim();
+                if (!trimmedEntry.length) return 1;
+                const percent = trimmedEntry.endsWith('%');
+                let num = parseFloat(trimmedEntry);
+                if (!Number.isFinite(num)) return 1;
+                if (percent) num = num / 100;
+                else if (num > 1) num = num > 100 ? num / 255 : num / 100;
+                return Math.max(0, Math.min(1, num));
+            };
+            const r = parseChannel(parts[0]);
+            const g = parseChannel(parts[1]);
+            const b = parseChannel(parts[2]);
+            if ([r, g, b].some(v => v === null)) return null;
+            const a = parseAlpha(parts[3]);
+            return { r, g, b, a };
+        }
+        return null;
+    };
+
     const identityMatrix = () => [1, 0, 0, 1, 0, 0];
 
     const multiplyMatrix = (a, b) => [
@@ -261,14 +313,14 @@ function registerFileSystem(ctx) {
     const colorFrom = (prop, fallback = DEFAULT_STROKE_COLOR) => {
         const value = staticValue(prop);
         if (Array.isArray(value)) {
-            const toHex = (val) => {
-                const scaled = (val <= 1 && val >= 0) ? Math.round(val * 255) : Math.round(val);
-                const clamped = Math.max(0, Math.min(255, scaled));
-                return clamped.toString(16).padStart(2, '0');
-            };
             const [r, g, b] = value;
             if ([r, g, b].some(v => v === undefined)) return fallback;
-            return `#${toHex(+r)}${toHex(+g)}${toHex(+b)}`;
+            const toByte = (val) => {
+                if (!Number.isFinite(val)) return 0;
+                const scaled = (val <= 1 && val >= 0) ? val * 255 : val;
+                return clampByte(scaled);
+            };
+            return `#${byteToHex(toByte(+r))}${byteToHex(toByte(+g))}${byteToHex(toByte(+b))}`;
         }
         if (value && typeof value === 'object') {
             const r = value.r ?? value.red ?? value[0];
@@ -277,6 +329,12 @@ function registerFileSystem(ctx) {
             if ([r, g, b].some(v => v === undefined)) return fallback;
             return colorFrom([+r, +g, +b], fallback);
         }
+        if (typeof value === 'string') {
+            const parsed = parseColorString(value);
+            if (parsed) {
+                return `#${byteToHex(parsed.r)}${byteToHex(parsed.g)}${byteToHex(parsed.b)}`;
+            }
+        }
         return fallback;
     };
 
@@ -284,14 +342,10 @@ function registerFileSystem(ctx) {
         const normalizedAlpha = Number.isFinite(alpha) ? Math.max(0, Math.min(1, alpha)) : 1;
         if (normalizedAlpha >= 0.999) return color;
         if (typeof color !== 'string') return color;
-        const hexMatch = /^#?([0-9a-f]{6})$/i.exec(color.trim());
-        if (!hexMatch) return color;
-        const hex = hexMatch[1];
-        const r = parseInt(hex.slice(0, 2), 16);
-        const g = parseInt(hex.slice(2, 4), 16);
-        const b = parseInt(hex.slice(4, 6), 16);
+        const parsed = parseColorString(color);
+        if (!parsed) return color;
         const rounded = +(normalizedAlpha.toFixed(PRECISION));
-        return `rgba(${r},${g},${b},${rounded})`;
+        return `rgba(${parsed.r},${parsed.g},${parsed.b},${rounded})`;
     };
 
     const gradientStopsFrom = (entry) => {
@@ -351,28 +405,27 @@ function registerFileSystem(ctx) {
     const gradientToColor = (entry, fallback = DEFAULT_STROKE_COLOR, opacityMultiplier = 1) => {
         const stops = gradientStopsFrom(entry);
         if (!stops.length) return colorWithAlpha(fallback, opacityMultiplier);
-        let chosen = null;
+        let accumR = 0;
+        let accumG = 0;
+        let accumB = 0;
+        let accumAlpha = 0;
+        let accumWeight = 0;
         stops.forEach(stop => {
-            if (!stop.color) return;
-            const alpha = Number.isFinite(stop.alpha) ? Math.max(0, Math.min(1, stop.alpha)) : 1;
-            if (!chosen) {
-                chosen = { ...stop, alpha };
-                return;
-            }
-            const chosenAlpha = Number.isFinite(chosen.alpha) ? chosen.alpha : 1;
-            if (alpha > chosenAlpha + EPSILON) {
-                chosen = { ...stop, alpha };
-                return;
-            }
-            if (Math.abs(alpha - chosenAlpha) <= EPSILON && stop.pos > chosen.pos) {
-                chosen = { ...stop, alpha };
-            }
+            if (!stop || !stop.color) return;
+            const parsed = parseColorString(stop.color);
+            if (!parsed) return;
+            const alpha = Number.isFinite(stop.alpha) ? Math.max(0, Math.min(1, stop.alpha)) : (Number.isFinite(parsed.a) ? parsed.a : 1);
+            if (alpha <= EPSILON) return;
+            accumR += parsed.r * alpha;
+            accumG += parsed.g * alpha;
+            accumB += parsed.b * alpha;
+            accumAlpha += alpha;
+            accumWeight += alpha;
         });
-        if (!chosen) return colorWithAlpha(fallback, opacityMultiplier);
-        const baseAlpha = Number.isFinite(chosen.alpha) ? Math.max(0, Math.min(1, chosen.alpha)) : 1;
-        const extra = Number.isFinite(opacityMultiplier) ? Math.max(0, Math.min(1, opacityMultiplier)) : 1;
-        const finalAlpha = baseAlpha * extra;
-        return colorWithAlpha(chosen.color, finalAlpha);
+        if (accumWeight <= EPSILON) return colorWithAlpha(fallback, opacityMultiplier);
+        const avgColor = `#${byteToHex(accumR / accumWeight)}${byteToHex(accumG / accumWeight)}${byteToHex(accumB / accumWeight)}`;
+        const avgAlpha = accumAlpha / stops.length;
+        return colorWithAlpha(avgColor, avgAlpha * opacityMultiplier);
     };
 
     const matrixFromTransform = (entry) => {
@@ -616,6 +669,14 @@ function registerFileSystem(ctx) {
             }
         });
 
+        if (api.sizeStage) {
+            try {
+                api.sizeStage();
+            } catch (err) {
+                console.warn('Stage sizing failed before Lottie conversion:', err);
+            }
+        }
+
         const stageSize = api.getCSSSize ? api.getCSSSize() : null;
         const targetWidth = Number.isFinite(+stageSize?.w) && +stageSize.w > 0
             ? +stageSize.w
@@ -661,6 +722,8 @@ function registerFileSystem(ctx) {
 
         const items = [];
         const pendingGeometry = [];
+        const groupByLayer = new Map();
+        const layerCounts = new Map();
         const bounds = {
             minX: Infinity,
             minY: Infinity,
@@ -674,6 +737,28 @@ function registerFileSystem(ctx) {
             bounds.minY = Math.min(bounds.minY, pt.y);
             bounds.maxX = Math.max(bounds.maxX, pt.x);
             bounds.maxY = Math.max(bounds.maxY, pt.y);
+        };
+
+        const ensureLayerGroup = (rawName) => {
+            if (!rawName) return null;
+            const key = String(rawName).trim();
+            if (!key) return null;
+            if (!groupByLayer.has(key)) {
+                const group = {
+                    id: rndId('lg'),
+                    type: 'group',
+                    kind: 'group',
+                    name: key,
+                    color: DEFAULT_STROKE_COLOR,
+                    width: 0,
+                    rot: 0,
+                    visible: true,
+                    children: []
+                };
+                groupByLayer.set(key, group);
+                items.push(group);
+            }
+            return groupByLayer.get(key);
         };
 
         const pushShape = (shapeNode, state, layerName) => {
@@ -787,6 +872,14 @@ function registerFileSystem(ctx) {
         });
 
         pendingGeometry.forEach(geo => {
+            const layerKey = typeof geo.layerName === 'string' ? geo.layerName.trim() : '';
+            const layerGroup = ensureLayerGroup(layerKey);
+            let elementLabel = geo.layerName;
+            if (layerKey) {
+                const count = (layerCounts.get(layerKey) || 0) + 1;
+                layerCounts.set(layerKey, count);
+                elementLabel = `${layerKey} #${count}`;
+            }
             const stagePoints = [];
             geo.points.forEach(pt => {
                 const stage = toStagePoint(pt);
@@ -842,8 +935,11 @@ function registerFileSystem(ctx) {
                 }).filter(Boolean);
                 if (mappedSegments.length) element.segments = mappedSegments;
             }
-            if (geo.layerName) element.name = geo.layerName;
+            if (elementLabel) element.name = elementLabel;
             items.push(element);
+            if (layerGroup && !layerGroup.children.includes(element.id)) {
+                layerGroup.children.push(element.id);
+            }
         });
 
         return {
