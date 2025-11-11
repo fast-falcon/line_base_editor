@@ -79,6 +79,317 @@ function registerFileSystem(ctx) {
         return out;
     }
 
+    const DEFAULT_STROKE_COLOR = '#ffffff';
+
+    const identityMatrix = () => [1, 0, 0, 1, 0, 0];
+
+    const multiplyMatrix = (a, b) => [
+        a[0] * b[0] + a[2] * b[1],
+        a[1] * b[0] + a[3] * b[1],
+        a[0] * b[2] + a[2] * b[3],
+        a[1] * b[2] + a[3] * b[3],
+        a[0] * b[4] + a[2] * b[5] + a[4],
+        a[1] * b[4] + a[3] * b[5] + a[5]
+    ];
+
+    const translateMatrix = (tx, ty) => [1, 0, 0, 1, tx || 0, ty || 0];
+
+    const scaleMatrix = (sx, sy) => [
+        Number.isFinite(sx) ? sx : 1,
+        0,
+        0,
+        Number.isFinite(sy) ? sy : 1,
+        0,
+        0
+    ];
+
+    const rotateMatrix = (deg) => {
+        const theta = (Number.isFinite(deg) ? deg : 0) * Math.PI / 180;
+        const cos = Math.cos(theta);
+        const sin = Math.sin(theta);
+        return [cos, sin, -sin, cos, 0, 0];
+    };
+
+    const applyMatrixPoint = (matrix, pt) => ({
+        x: matrix[0] * pt.x + matrix[2] * pt.y + matrix[4],
+        y: matrix[1] * pt.x + matrix[3] * pt.y + matrix[5]
+    });
+
+    const staticValue = (prop) => {
+        if (prop === null || prop === undefined) return null;
+        if (typeof prop === 'object') {
+            if ('a' in prop && prop.a !== 0) return null;
+            if ('k' in prop) return prop.k;
+        }
+        return prop;
+    };
+
+    const numberFrom = (prop, fallback = 0) => {
+        if (prop && typeof prop === 'object' && prop.x !== undefined && prop.y === undefined) {
+            return numberFrom(prop.x, fallback);
+        }
+        const value = staticValue(prop);
+        if (value === null || value === undefined) return fallback;
+        const num = Array.isArray(value) ? +value[0] : +value;
+        return Number.isFinite(num) ? num : fallback;
+    };
+
+    const pointFrom = (prop) => {
+        if (!prop || typeof prop !== 'object') {
+            const num = numberFrom(prop, 0);
+            return { x: num, y: 0 };
+        }
+        if (prop.x !== undefined && prop.y !== undefined) {
+            return {
+                x: numberFrom(prop.x, 0),
+                y: numberFrom(prop.y, 0)
+            };
+        }
+        const value = staticValue(prop);
+        if (Array.isArray(value)) {
+            const x = Number.isFinite(+value[0]) ? +value[0] : 0;
+            const y = Number.isFinite(+value[1]) ? +value[1] : 0;
+            return { x, y };
+        }
+        if (value && typeof value === 'object') {
+            const x = Number.isFinite(+(value.x ?? value[0])) ? +(value.x ?? value[0]) : 0;
+            const y = Number.isFinite(+(value.y ?? value[1])) ? +(value.y ?? value[1]) : 0;
+            return { x, y };
+        }
+        const num = numberFrom(value, 0);
+        return { x: num, y: 0 };
+    };
+
+    const scaleFrom = (prop) => {
+        if (prop && typeof prop === 'object' && prop.x !== undefined && prop.y !== undefined && !('k' in prop)) {
+            return {
+                x: numberFrom(prop.x, 100) / 100,
+                y: numberFrom(prop.y, 100) / 100
+            };
+        }
+        const value = staticValue(prop);
+        if (Array.isArray(value)) {
+            const sx = Number.isFinite(+value[0]) ? +value[0] : 100;
+            const sy = Number.isFinite(+value[1]) ? +value[1] : sx;
+            return { x: sx / 100, y: sy / 100 };
+        }
+        if (value && typeof value === 'object') {
+            const sx = Number.isFinite(+(value.x ?? value[0])) ? +(value.x ?? value[0]) : 100;
+            const sy = Number.isFinite(+(value.y ?? value[1])) ? +(value.y ?? value[1]) : sx;
+            return { x: sx / 100, y: sy / 100 };
+        }
+        const num = numberFrom(value, 100);
+        const ratio = num / 100;
+        return { x: ratio, y: ratio };
+    };
+
+    const opacityFrom = (prop) => {
+        const value = numberFrom(prop, 100);
+        return Number.isFinite(value) ? value / 100 : 1;
+    };
+
+    const colorFrom = (prop, fallback = DEFAULT_STROKE_COLOR) => {
+        const value = staticValue(prop);
+        if (Array.isArray(value)) {
+            const toHex = (val) => {
+                const scaled = (val <= 1 && val >= 0) ? Math.round(val * 255) : Math.round(val);
+                const clamped = Math.max(0, Math.min(255, scaled));
+                return clamped.toString(16).padStart(2, '0');
+            };
+            const [r, g, b] = value;
+            if ([r, g, b].some(v => v === undefined)) return fallback;
+            return `#${toHex(+r)}${toHex(+g)}${toHex(+b)}`;
+        }
+        if (value && typeof value === 'object') {
+            const r = value.r ?? value.red ?? value[0];
+            const g = value.g ?? value.green ?? value[1];
+            const b = value.b ?? value.blue ?? value[2];
+            if ([r, g, b].some(v => v === undefined)) return fallback;
+            return colorFrom([+r, +g, +b], fallback);
+        }
+        return fallback;
+    };
+
+    const matrixFromTransform = (entry) => {
+        if (!entry || typeof entry !== 'object') return identityMatrix();
+        const anchor = pointFrom(entry.a);
+        const position = pointFrom(entry.p);
+        const scale = scaleFrom(entry.s);
+        const rotation = numberFrom(entry.r ?? entry.z ?? entry.rx ?? entry.ry, 0);
+        let matrix = identityMatrix();
+        matrix = multiplyMatrix(matrix, translateMatrix(position.x, position.y));
+        if (Math.abs(rotation) > EPSILON) matrix = multiplyMatrix(matrix, rotateMatrix(rotation));
+        matrix = multiplyMatrix(matrix, scaleMatrix(scale.x, scale.y));
+        matrix = multiplyMatrix(matrix, translateMatrix(-anchor.x, -anchor.y));
+        return matrix;
+    };
+
+    const isLottieAnimation = (data) => {
+        if (!data || typeof data !== 'object') return false;
+        if (Array.isArray(data.layers) && (typeof data.v === 'string' || Number.isFinite(+data.ip) || Number.isFinite(+data.op))) {
+            return true;
+        }
+        return false;
+    };
+
+    const convertLottieToPack = (data) => {
+        const width = Number.isFinite(+data.w) && +data.w > 0 ? +data.w : 512;
+        const height = Number.isFinite(+data.h) && +data.h > 0 ? +data.h : 512;
+        const layers = Array.isArray(data.layers) ? data.layers : [];
+        const layerMap = new Map();
+        layers.forEach(layer => {
+            if (layer && Number.isFinite(+layer.ind)) {
+                layerMap.set(+layer.ind, layer);
+            }
+        });
+
+        const transformCache = new Map();
+        const layerWorldMatrix = (layer) => {
+            if (!layer) return identityMatrix();
+            if (transformCache.has(layer.ind)) return transformCache.get(layer.ind);
+            let matrix = matrixFromTransform(layer.ks);
+            if (Number.isFinite(+layer.parent)) {
+                const parent = layerMap.get(+layer.parent);
+                if (parent) {
+                    matrix = multiplyMatrix(layerWorldMatrix(parent), matrix);
+                }
+            }
+            transformCache.set(layer.ind, matrix);
+            return matrix;
+        };
+
+        const norm = (value, denom) => {
+            if (!Number.isFinite(value) || !Number.isFinite(denom) || denom === 0) return 0;
+            return +((value / denom).toFixed(PRECISION));
+        };
+
+        const cloneState = (state) => ({
+            transform: Array.isArray(state.transform) ? state.transform.slice() : identityMatrix(),
+            strokeColor: state.strokeColor,
+            strokeWidth: state.strokeWidth,
+            fill: state.fill
+        });
+
+        const items = [];
+
+        const pushShape = (shapeNode, state, layerName) => {
+            if (!shapeNode || typeof shapeNode !== 'object') return;
+            if (shapeNode.hd) return;
+            const raw = shapeNode.ks;
+            if (!raw) return;
+            let pathValue = staticValue(raw);
+            if ((!pathValue || !pathValue.v) && Array.isArray(raw.k) && raw.k.length) {
+                const first = raw.k[0];
+                if (first && typeof first === 'object') {
+                    const source = Array.isArray(first.s) ? first.s[0] : first.s;
+                    if (source && source.v) pathValue = source;
+                }
+            }
+            if (!pathValue || !Array.isArray(pathValue.v)) return;
+            const verts = pathValue.v.map(pt => toPoint(pt)).filter(Boolean);
+            if (verts.length < 2) return;
+            const transformed = verts.map(pt => applyMatrixPoint(state.transform, pt));
+            const path = transformed.map(pt => ({ x: norm(pt.x, width), y: norm(pt.y, height) }));
+            const segments = [];
+            for (let i = 0; i < transformed.length - 1; i++) {
+                const p1 = transformed[i];
+                const p2 = transformed[i + 1];
+                if (!p1 || !p2) continue;
+                segments.push({
+                    kind: 'line',
+                    p1: { x: norm(p1.x, width), y: norm(p1.y, height) },
+                    p2: { x: norm(p2.x, width), y: norm(p2.y, height) }
+                });
+            }
+            if (pathValue.c && transformed.length > 1) {
+                const last = transformed[transformed.length - 1];
+                const first = transformed[0];
+                segments.push({
+                    kind: 'line',
+                    p1: { x: norm(last.x, width), y: norm(last.y, height) },
+                    p2: { x: norm(first.x, width), y: norm(first.y, height) }
+                });
+            }
+            const strokeWidth = Number.isFinite(+state.strokeWidth) ? Math.max(0, +state.strokeWidth) : 0;
+            const element = {
+                id: rndId('lt'),
+                type: 'shape',
+                kind: 'shape',
+                color: state.strokeColor || DEFAULT_STROKE_COLOR,
+                width: strokeWidth,
+                path,
+                visible: true
+            };
+            if (segments.length) element.segments = segments;
+            if (state.fill) element.fill = state.fill;
+            if (layerName) element.name = layerName;
+            items.push(element);
+        };
+
+        const parseGroup = (entries, incomingState, layerName) => {
+            if (!Array.isArray(entries)) return;
+            const transformEntry = entries.find(entry => entry && entry.ty === 'tr');
+            const baseTransform = transformEntry
+                ? multiplyMatrix(incomingState.transform, matrixFromTransform(transformEntry))
+                : incomingState.transform;
+            const state = {
+                transform: baseTransform,
+                strokeColor: incomingState.strokeColor,
+                strokeWidth: incomingState.strokeWidth,
+                fill: incomingState.fill
+            };
+            entries.forEach(entry => {
+                if (!entry || entry.ty === 'tr') return;
+                if (entry.ty === 'gr') {
+                    parseGroup(entry.it || [], cloneState(state), layerName);
+                    return;
+                }
+                if (entry.ty === 'st') {
+                    const opacity = opacityFrom(entry.o);
+                    if (opacity <= 0) {
+                        state.strokeWidth = 0;
+                    } else {
+                        state.strokeColor = colorFrom(entry.c, state.strokeColor || DEFAULT_STROKE_COLOR);
+                        const width = numberFrom(entry.w, state.strokeWidth);
+                        if (Number.isFinite(width)) state.strokeWidth = Math.max(0, width);
+                    }
+                    return;
+                }
+                if (entry.ty === 'fl') {
+                    const opacity = opacityFrom(entry.o);
+                    state.fill = opacity <= 0 ? null : colorFrom(entry.c, state.fill || DEFAULT_STROKE_COLOR);
+                    return;
+                }
+                if (entry.ty === 'sh') {
+                    pushShape(entry, state, layerName);
+                }
+            });
+        };
+
+        layers.forEach(layer => {
+            if (!layer || layer.ty !== 4) return;
+            if (layer.hd || layer.tt) return;
+            const opacity = opacityFrom(layer.ks?.o);
+            if (opacity <= 0) return;
+            const layerMatrix = layerWorldMatrix(layer);
+            const baseState = {
+                transform: layerMatrix,
+                strokeColor: DEFAULT_STROKE_COLOR,
+                strokeWidth: 0,
+                fill: null
+            };
+            parseGroup(layer.shapes || [], baseState, layer.nm);
+        });
+
+        return {
+            type: 'LinePack',
+            version: 2,
+            size: { w: width, h: height },
+            elements: items,
+            animations: []
+        };
+    };
+
     const KIND_ALIASES = {
         l: 'line',
         line: 'line',
@@ -963,6 +1274,11 @@ function registerFileSystem(ctx) {
 
     function importPack(pack) {
         if (!pack || typeof pack !== 'object') throw new Error('فایل معتبر نیست');
+        if (isLottieAnimation(pack)) {
+            const converted = convertLottieToPack(pack);
+            importFullPack(converted);
+            return;
+        }
         const normalized = expandCompactPack(pack);
         if (normalized.type === 'LinePack') {
             importFullPack(normalized);
