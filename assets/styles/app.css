@@ -191,7 +191,7 @@ input[type=file] {
     display: flex;
     flex-direction: column;
     min-height: 75%;
-    position: relative;
+    position: initial;
     overflow-y: scroll;
     overflow-x: hidden;
 }
