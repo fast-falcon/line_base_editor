@@ -243,6 +243,30 @@ function registerFileSystem(ctx) {
             }
         });
 
+        const stageSize = api.getCSSSize ? api.getCSSSize() : null;
+        const targetWidth = Number.isFinite(+stageSize?.w) && +stageSize.w > 0
+            ? +stageSize.w
+            : (Number.isFinite(+canvas?.width) && +canvas.width > 0 ? +canvas.width : width);
+        const targetHeight = Number.isFinite(+stageSize?.h) && +stageSize.h > 0
+            ? +stageSize.h
+            : (Number.isFinite(+canvas?.height) && +canvas.height > 0 ? +canvas.height : height);
+
+        const scaleX = width > 0 ? targetWidth / width : 1;
+        const scaleY = height > 0 ? targetHeight / height : 1;
+        let uniformScale = Math.min(
+            Number.isFinite(scaleX) && scaleX > 0 ? scaleX : 1,
+            Number.isFinite(scaleY) && scaleY > 0 ? scaleY : 1
+        );
+        if (!Number.isFinite(uniformScale) || uniformScale <= 0) uniformScale = 1;
+
+        const offsetX = (targetWidth - width * uniformScale) / 2;
+        const offsetY = (targetHeight - height * uniformScale) / 2;
+
+        const toStagePoint = (pt) => ({
+            x: pt.x * uniformScale + offsetX,
+            y: pt.y * uniformScale + offsetY
+        });
+
         const transformCache = new Map();
         const layerWorldMatrix = (layer) => {
             if (!layer) return identityMatrix();
@@ -288,8 +312,8 @@ function registerFileSystem(ctx) {
             if (!pathValue || !Array.isArray(pathValue.v)) return;
             const verts = pathValue.v.map(pt => toPoint(pt)).filter(Boolean);
             if (verts.length < 2) return;
-            const transformed = verts.map(pt => applyMatrixPoint(state.transform, pt));
-            const path = transformed.map(pt => ({ x: norm(pt.x, width), y: norm(pt.y, height) }));
+            const transformed = verts.map(pt => toStagePoint(applyMatrixPoint(state.transform, pt)));
+            const path = transformed.map(pt => ({ x: norm(pt.x, targetWidth), y: norm(pt.y, targetHeight) }));
             const segments = [];
             for (let i = 0; i < transformed.length - 1; i++) {
                 const p1 = transformed[i];
@@ -297,8 +321,8 @@ function registerFileSystem(ctx) {
                 if (!p1 || !p2) continue;
                 segments.push({
                     kind: 'line',
-                    p1: { x: norm(p1.x, width), y: norm(p1.y, height) },
-                    p2: { x: norm(p2.x, width), y: norm(p2.y, height) }
+                    p1: { x: norm(p1.x, targetWidth), y: norm(p1.y, targetHeight) },
+                    p2: { x: norm(p2.x, targetWidth), y: norm(p2.y, targetHeight) }
                 });
             }
             if (pathValue.c && transformed.length > 1) {
@@ -306,11 +330,13 @@ function registerFileSystem(ctx) {
                 const first = transformed[0];
                 segments.push({
                     kind: 'line',
-                    p1: { x: norm(last.x, width), y: norm(last.y, height) },
-                    p2: { x: norm(first.x, width), y: norm(first.y, height) }
+                    p1: { x: norm(last.x, targetWidth), y: norm(last.y, targetHeight) },
+                    p2: { x: norm(first.x, targetWidth), y: norm(first.y, targetHeight) }
                 });
             }
-            const strokeWidth = Number.isFinite(+state.strokeWidth) ? Math.max(0, +state.strokeWidth) : 0;
+            const strokeWidth = Number.isFinite(+state.strokeWidth)
+                ? Math.max(0, +state.strokeWidth * uniformScale)
+                : 0;
             const element = {
                 id: rndId('lt'),
                 type: 'shape',
@@ -384,7 +410,7 @@ function registerFileSystem(ctx) {
         return {
             type: 'LinePack',
             version: 2,
-            size: { w: width, h: height },
+            size: { w: targetWidth, h: targetHeight },
             elements: items,
             animations: []
         };
