@@ -79,6 +79,30 @@ function registerFileSystem(ctx) {
         return out;
     }
 
+    const KIND_ALIASES = {
+        l: 'line',
+        line: 'line',
+        ln: 'line',
+        q: 'quadratic',
+        quad: 'quadratic',
+        quadratic: 'quadratic',
+        c: 'quadratic',
+        curve: 'quadratic',
+        s: 'shape',
+        sh: 'shape',
+        shape: 'shape',
+        g: 'group',
+        grp: 'group',
+        group: 'group'
+    };
+
+    const KIND_SHORT = {
+        line: 'l',
+        quadratic: 'q',
+        shape: 's',
+        group: 'g'
+    };
+
     const normPoint = (p, w, h) => {
         if (!p || typeof p.x !== 'number' || typeof p.y !== 'number') return null;
         return [+(p.x / w).toFixed(PRECISION), +(p.y / h).toFixed(PRECISION)];
@@ -119,6 +143,223 @@ function registerFileSystem(ctx) {
             }
             return { type: 'line', start, end };
         }).filter(Boolean);
+    };
+
+    const toPoint = (value) => {
+        if (value === null || value === undefined) return null;
+        if (Array.isArray(value)) {
+            if (value.length >= 2 && typeof value[0] !== 'object' && typeof value[1] !== 'object') {
+                const x = +value[0];
+                const y = +value[1];
+                if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+                return { x, y };
+            }
+            if (Array.isArray(value[0])) {
+                return toPoint(value[0]);
+            }
+            if (typeof value[0] === 'object') {
+                return toPoint(value[0]);
+            }
+            return null;
+        }
+        if (typeof value === 'object') {
+            const x = value.x ?? value[0];
+            const y = value.y ?? value[1];
+            if (x === undefined || y === undefined) return null;
+            const px = +x;
+            const py = +y;
+            if (!Number.isFinite(px) || !Number.isFinite(py)) return null;
+            return { x: px, y: py };
+        }
+        return null;
+    };
+
+    const expandPath = (pathSource) => {
+        if (!Array.isArray(pathSource)) return [];
+        if (!pathSource.length) return [];
+        if (typeof pathSource[0] === 'number') {
+            const out = [];
+            for (let i = 0; i < pathSource.length - 1; i += 2) {
+                const pt = toPoint([pathSource[i], pathSource[i + 1]]);
+                if (pt) out.push(pt);
+            }
+            return out;
+        }
+        return pathSource.map(pt => toPoint(pt)).filter(Boolean);
+    };
+
+    const expandCompactItem = (entry) => {
+        if (!entry) return null;
+        if (Array.isArray(entry)) {
+            const [id, kind, payload] = entry;
+            const obj = { i: id, k: kind };
+            if (payload !== undefined) obj.p = payload;
+            entry = obj;
+        }
+        if (typeof entry !== 'object') return null;
+        const id = entry.id ?? entry.i ?? entry.name ?? null;
+        if (!id) return null;
+        const kindRaw = entry.kind ?? entry.type ?? entry.k ?? 'line';
+        const kind = KIND_ALIASES[kindRaw] ?? kindRaw;
+        const base = { id, type: kind, kind };
+
+        const styleSource = typeof entry.style === 'object' && entry.style
+            ? { ...entry.style }
+            : {};
+        if ('c' in entry && styleSource.color === undefined) styleSource.color = entry.c;
+        if ('color' in entry && styleSource.color === undefined) styleSource.color = entry.color;
+        if ('w' in entry && styleSource.width === undefined) styleSource.width = entry.w;
+        if ('width' in entry && styleSource.width === undefined) styleSource.width = entry.width;
+        if ('r' in entry && styleSource.rot === undefined) styleSource.rot = entry.r;
+        if ('rot' in entry && styleSource.rot === undefined) styleSource.rot = entry.rot;
+        if ('rotation' in entry && styleSource.rot === undefined) styleSource.rot = entry.rotation;
+        if ('v' in entry && styleSource.visible === undefined) styleSource.visible = entry.v;
+        if ('visible' in entry && styleSource.visible === undefined) styleSource.visible = entry.visible;
+        const fillValue = entry.fill ?? entry.f ?? styleSource.fill;
+        if (fillValue !== undefined) {
+            base.fill = fillValue;
+            delete styleSource.fill;
+        }
+        if (styleSource.width !== undefined) {
+            const w = +styleSource.width;
+            styleSource.width = Number.isFinite(w) ? w : undefined;
+        }
+        if (styleSource.rot !== undefined) {
+            const r = +styleSource.rot;
+            styleSource.rot = Number.isFinite(r) ? r : undefined;
+        }
+        if (styleSource.visible !== undefined) {
+            styleSource.visible = !!styleSource.visible;
+        }
+        Object.keys(styleSource).forEach(key => {
+            if (styleSource[key] === undefined) delete styleSource[key];
+        });
+        if (Object.keys(styleSource).length) base.style = styleSource;
+
+        const points = entry.points ?? entry.p;
+        if (kind === 'line' || kind === 'quadratic') {
+            let start = entry.start ?? entry.s;
+            let end = entry.end ?? entry.e;
+            let control = entry.control ?? entry.cp ?? entry.ctrl ?? entry.q;
+            if ((!start || !end) && points) {
+                if (Array.isArray(points)) {
+                    if (points.length >= 4 && typeof points[0] === 'number') {
+                        start = [points[0], points[1]];
+                        end = [points[2], points[3]];
+                        if (points.length >= 6) control = [points[4], points[5]];
+                    } else if (points.length >= 2 && Array.isArray(points[0])) {
+                        start = points[0];
+                        end = points[1];
+                        if (points.length >= 3) control = points[2];
+                    } else if (typeof points[0] === 'object') {
+                        start = points[0];
+                        end = points[1];
+                        if (points.length >= 3) control = points[2];
+                    }
+                } else if (typeof points === 'object') {
+                    start = points.p1 ?? points.start ?? points.a ?? start;
+                    end = points.p2 ?? points.end ?? points.b ?? end;
+                    control = points.cp ?? points.control ?? points.c ?? control;
+                }
+            }
+            const startPt = toPoint(start);
+            const endPt = toPoint(end);
+            if (startPt) base.start = startPt;
+            if (endPt) base.end = endPt;
+            if (kind === 'quadratic') {
+                const cp = toPoint(control);
+                if (cp) base.control = cp;
+            }
+        } else if (kind === 'shape') {
+            const path = expandPath(points ?? entry.path);
+            if (path.length) base.path = path;
+            if (Array.isArray(entry.segments)) base.segments = entry.segments;
+            if (Array.isArray(entry.children)) base.children = entry.children.slice();
+        } else if (kind === 'group') {
+            if (Array.isArray(entry.children)) base.children = entry.children.slice();
+        }
+        return base;
+    };
+
+    const expandCompactKeyframe = (entry) => {
+        if (!entry) return null;
+        if (Array.isArray(entry)) {
+            const [time, snapshot] = entry;
+            entry = { t: time, s: snapshot };
+        }
+        if (typeof entry !== 'object') return null;
+        const t = +(entry.t ?? entry.time ?? entry.sec ?? 0);
+        if (!Number.isFinite(t)) return null;
+        const snapshotSource = entry.snapshot ?? entry.s ?? entry.items ?? [];
+        const snapshot = Array.isArray(snapshotSource)
+            ? snapshotSource.map(expandCompactItem).filter(Boolean)
+            : [];
+        return { t, snapshot };
+    };
+
+    const expandCompactAnimation = (entry) => {
+        if (!entry) return null;
+        if (Array.isArray(entry)) {
+            const [id, name, duration, keyframes] = entry;
+            entry = { i: id, n: name, d: duration, k: keyframes };
+        }
+        if (typeof entry !== 'object') return null;
+        const id = entry.id ?? entry.i ?? null;
+        const name = entry.name ?? entry.n ?? id ?? 'Animation';
+        const duration = +(entry.duration ?? entry.d ?? 5);
+        const keyframesSource = entry.keyframes ?? entry.k ?? [];
+        const keyframes = Array.isArray(keyframesSource)
+            ? keyframesSource.map(expandCompactKeyframe).filter(Boolean)
+            : [];
+        return {
+            id: id ?? `anim_${Math.random().toString(36).slice(2, 8)}`,
+            name,
+            duration,
+            keyframes
+        };
+    };
+
+    const expandCompactPack = (pack) => {
+        if (!pack || typeof pack !== 'object') return pack;
+        if (pack.type) return pack;
+        if (!('t' in pack)) return pack;
+        const typeMap = {
+            LP: 'LinePack',
+            LinePack: 'LinePack',
+            LPS: 'LinePackSummary',
+            LinePackSummary: 'LinePackSummary'
+        };
+        const type = typeMap[pack.t] ?? pack.type ?? 'LinePack';
+        const sizeSource = pack.s ?? pack.size;
+        let size = { w: 512, h: 512 };
+        if (Array.isArray(sizeSource)) {
+            size = {
+                w: Number.isFinite(+sizeSource[0]) ? +sizeSource[0] : 512,
+                h: Number.isFinite(+sizeSource[1]) ? +sizeSource[1] : 512
+            };
+        } else if (typeof sizeSource === 'object' && sizeSource) {
+            const w = sizeSource.w ?? sizeSource.width ?? sizeSource[0];
+            const h = sizeSource.h ?? sizeSource.height ?? sizeSource[1];
+            size = {
+                w: Number.isFinite(+w) ? +w : 512,
+                h: Number.isFinite(+h) ? +h : 512
+            };
+        }
+        const elementsSource = pack.e ?? pack.elements ?? [];
+        const animationsSource = pack.a ?? pack.animations ?? [];
+        const elements = Array.isArray(elementsSource)
+            ? elementsSource.map(expandCompactItem).filter(Boolean)
+            : [];
+        const animations = Array.isArray(animationsSource)
+            ? animationsSource.map(expandCompactAnimation).filter(Boolean)
+            : [];
+        return {
+            type,
+            version: +(pack.v ?? pack.version ?? 2),
+            size,
+            elements,
+            animations
+        };
     };
 
     const simplifyItem = (it, w, h) => {
@@ -465,13 +706,41 @@ function registerFileSystem(ctx) {
 
     function exportPack(minimal = false) {
         const { w, h } = api.getCSSSize ? api.getCSSSize() : { w: canvas.width, h: canvas.height };
-        const els = state.items.map(it => serializeItem(it, w, h, minimal));
+        if (minimal) {
+            const elements = state.items
+                .map(it => serializeItemCompact(it, w, h))
+                .filter(Boolean);
+            const animations = state.animations.map(anim => {
+                const keyframes = (anim.keyframes || []).map(k => ({
+                    t: Number.isFinite(+k.t) ? +(+k.t).toFixed(3) : 0,
+                    s: (k.snapshot || []).map(it => serializeItemCompact(it, w, h)).filter(Boolean)
+                }));
+                return {
+                    i: anim.id,
+                    n: anim.name,
+                    d: Number.isFinite(+anim.duration) ? +(+anim.duration).toFixed(3) : 0,
+                    k: keyframes
+                };
+            });
+            return {
+                t: 'LP',
+                v: 2,
+                s: [Number.isFinite(+w) ? +(+w).toFixed(3) : 0, Number.isFinite(+h) ? +(+h).toFixed(3) : 0],
+                e: elements,
+                a: animations
+            };
+        }
+
+        const els = state.items
+            .map(it => serializeItem(it, w, h, 6))
+            .filter(Boolean);
         const anims = state.animations.map(a => ({
+            id: a.id,
             name: a.name,
-            duration: a.duration,
-            keyframes: a.keyframes.map(k => ({
-                t: k.t,
-                snapshot: k.snapshot.map(it => serializeItem(it, w, h, true))
+            duration: Number.isFinite(+a.duration) ? +a.duration : 0,
+            keyframes: (a.keyframes || []).map(k => ({
+                t: Number.isFinite(+k.t) ? +k.t : 0,
+                snapshot: (k.snapshot || []).map(it => serializeItem(it, w, h, 6)).filter(Boolean)
             }))
         }));
         return {
@@ -548,44 +817,159 @@ function registerFileSystem(ctx) {
         };
     }
 
-    function serializeItem(it, w, h, min) {
+    function serializeItem(it, w, h, precisionFlag) {
+        if (!it) return null;
+        const digits = typeof precisionFlag === 'number'
+            ? precisionFlag
+            : (precisionFlag ? 3 : 6);
+        const fix = (value) => {
+            const rounded = +value.toFixed(digits);
+            return Number.isFinite(rounded) ? rounded : 0;
+        };
+        const norm = (p) => {
+            if (!p) return null;
+            return { x: fix(p.x / w), y: fix(p.y / h) };
+        };
+
+        const style = {
+            color: it.color,
+            width: Number.isFinite(+it.width) ? +it.width : 0
+        };
+        const rot = +(it.rot || 0);
+        if (Math.abs(rot) > 1e-6) style.rot = +rot.toFixed(3);
+        if (it.visible === false) style.visible = false;
+        if (it.fill !== undefined && it.fill !== null && it.kind !== 'shape') {
+            style.fill = it.fill;
+        }
+        Object.keys(style).forEach(key => {
+            if (style[key] === undefined) delete style[key];
+        });
+
         const base = {
             id: it.id,
-            kind: it.kind,
-            style: {
-                color: it.color,
-                width: +it.width,
-                rot: +(it.rot || 0),
-                visible: it.visible !== false
-            }
+            type: it.kind,
+            style
         };
-        const norm = p => ({ x: +(p.x / w).toFixed(min ? 3 : 6), y: +(p.y / h).toFixed(min ? 3 : 6) });
-        if (it.kind === 'line') return { ...base, points: { p1: norm(it.p1), p2: norm(it.p2) } };
-        if (it.kind === 'quadratic') return { ...base, points: { p1: norm(it.p1), cp: norm(it.cp), p2: norm(it.p2) } };
-        if (it.kind === 'shape') {
-            const segs = Array.isArray(it.segments) ? it.segments.map(seg => {
-                if (!seg || !seg.p1 || !seg.p2) return null;
-                if (seg.kind === 'quadratic' && seg.cp) {
-                    return { kind: 'quadratic', p1: norm(seg.p1), cp: norm(seg.cp), p2: norm(seg.p2) };
-                }
-                return { kind: 'line', p1: norm(seg.p1), p2: norm(seg.p2) };
-            }).filter(Boolean) : null;
-            const out = { ...base, fill: it.fill || null, path: it.path.map(norm), children: it.children || [] };
-            if (segs && segs.length) out.segments = segs;
-            return out;
+
+        if (it.kind === 'group') {
+            if (Array.isArray(it.children)) base.children = it.children.slice();
+            return base;
         }
-        if (it.kind === 'group') return { ...base, children: it.children?.slice() || [] };
+
+        if (it.kind === 'line') {
+            const start = norm(it.p1);
+            const end = norm(it.p2);
+            if (!start || !end) return null;
+            base.start = start;
+            base.end = end;
+            return base;
+        }
+
+        if (it.kind === 'quadratic') {
+            const start = norm(it.p1);
+            const control = norm(it.cp);
+            const end = norm(it.p2);
+            if (!start || !control || !end) return null;
+            base.start = start;
+            base.control = control;
+            base.end = end;
+            return base;
+        }
+
+        if (it.kind === 'shape') {
+            const path = Array.isArray(it.path) ? it.path.map(norm).filter(Boolean) : [];
+            if (path.length) base.path = path;
+            if (it.fill !== undefined) base.fill = it.fill;
+            if (Array.isArray(it.children) && it.children.length) base.children = it.children.slice();
+            if (Array.isArray(it.segments) && it.segments.length) {
+                base.segments = it.segments.map(seg => {
+                    if (!seg || !seg.p1 || !seg.p2) return null;
+                    const out = {
+                        kind: seg.kind === 'quadratic' ? 'quadratic' : 'line',
+                        p1: norm(seg.p1),
+                        p2: norm(seg.p2)
+                    };
+                    if (seg.kind === 'quadratic' && seg.cp) out.cp = norm(seg.cp);
+                    return out.p1 && out.p2 ? out : null;
+                }).filter(Boolean);
+            }
+            return base;
+        }
+
         return base;
+    }
+
+    function serializeItemCompact(it, w, h) {
+        if (!it) return null;
+        const kind = it.kind;
+        const entry = {
+            i: it.id,
+            k: KIND_SHORT[kind] ?? kind
+        };
+        if (it.color) entry.c = it.color;
+        const width = +it.width;
+        if (Number.isFinite(width)) entry.w = +(+width.toFixed(3));
+        const rot = +(it.rot || 0);
+        if (Math.abs(rot) > 1e-6) entry.r = +rot.toFixed(3);
+        if (it.visible === false) entry.v = 0;
+
+        if (kind === 'group') {
+            if (Array.isArray(it.children) && it.children.length) entry.children = it.children.slice();
+            return entry;
+        }
+
+        if (kind === 'line') {
+            const p1 = normPoint(it.p1, w, h);
+            const p2 = normPoint(it.p2, w, h);
+            if (!p1 || !p2) return null;
+            entry.p = [...p1, ...p2];
+            return entry;
+        }
+
+        if (kind === 'quadratic') {
+            const p1 = normPoint(it.p1, w, h);
+            const p2 = normPoint(it.p2, w, h);
+            const cp = normPoint(it.cp, w, h);
+            if (!p1 || !p2 || !cp) return null;
+            entry.p = [...p1, ...p2, ...cp];
+            return entry;
+        }
+
+        if (kind === 'shape') {
+            const path = Array.isArray(it.path) ? it.path.map(pt => normPoint(pt, w, h)).filter(Boolean) : [];
+            if (path.length) entry.p = path;
+            if (it.fill !== undefined && it.fill !== null) entry.f = it.fill;
+            if (Array.isArray(it.children) && it.children.length) entry.children = it.children.slice();
+            if (Array.isArray(it.segments) && it.segments.length) {
+                const segments = it.segments.map(seg => {
+                    if (!seg || !seg.p1 || !seg.p2) return null;
+                    const p1 = normPoint(seg.p1, w, h);
+                    const p2 = normPoint(seg.p2, w, h);
+                    if (!p1 || !p2) return null;
+                    const out = { kind: seg.kind === 'quadratic' ? 'quadratic' : 'line', p1, p2 };
+                    if (seg.kind === 'quadratic' && seg.cp) {
+                        const cp = normPoint(seg.cp, w, h);
+                        if (cp) out.cp = cp;
+                    }
+                    return out;
+                }).filter(Boolean);
+                if (segments.length) entry.segments = segments;
+            }
+            return entry;
+        }
+
+        return entry;
     }
 
     function importPack(pack) {
         if (!pack || typeof pack !== 'object') throw new Error('فایل معتبر نیست');
-        if (pack.type === 'LinePack') {
-            importFullPack(pack);
+        const normalized = expandCompactPack(pack);
+        if (normalized.type === 'LinePack') {
+            importFullPack(normalized);
             return;
         }
-        if (pack.type === 'LinePackSummary') {
-            importSummaryPack(pack);
+        if (normalized.type === 'LinePackSummary') {
+            importSummaryPack(normalized);
             return;
         }
         throw new Error('نوع فایل پشتیبانی نمی‌شود');
@@ -594,7 +978,7 @@ function registerFileSystem(ctx) {
     function importFullPack(pack) {
         const size = pack.size || { w: canvas.width, h: canvas.height };
         const animations = (pack.animations || []).map(a => ({
-            id: rndId('anim'),
+            id: a.id || rndId('anim'),
             name: a.name,
             duration: a.duration,
             keyframes: (a.keyframes || []).map(k => ({
@@ -666,35 +1050,72 @@ function registerFileSystem(ctx) {
     }
 
     function deserializeItem(el, size) {
-        const den = (p) => ({ x: p.x * size.w, y: p.y * size.h });
+        const den = (p) => {
+            if (!p) return null;
+            const x = p.x ?? p[0];
+            const y = p.y ?? p[1];
+            if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+            return { x: x * size.w, y: y * size.h };
+        };
+        const kindRaw = el.kind ?? el.type ?? el.k;
+        const kind = KIND_ALIASES[kindRaw] ?? kindRaw ?? 'line';
+        const style = el.style || {};
         const base = {
             id: el.id || rndId('it'),
-            kind: el.kind,
-            color: el.style?.color || '#fff',
-            width: +(el.style?.width || 3),
-            rot: +(el.style?.rot || 0),
-            visible: el.style?.visible !== false
+            kind,
+            color: style.color ?? el.color ?? '#fff',
+            width: Number.isFinite(+(style.width ?? el.width)) ? +(style.width ?? el.width) : 3,
+            rot: Number.isFinite(+(style.rot ?? el.rot ?? el.rotation)) ? +(style.rot ?? el.rot ?? el.rotation) : 0,
+            visible: (style.visible ?? el.visible ?? true) !== false
         };
-        if (el.kind === 'line') {
-            return { ...base, p1: den(el.points.p1), p2: den(el.points.p2) };
+        if (kind === 'line') {
+            const start = el.points?.p1 ?? el.start ?? el.s;
+            const end = el.points?.p2 ?? el.end ?? el.e;
+            const p1 = den(start);
+            const p2 = den(end);
+            if (!p1 || !p2) return null;
+            return { ...base, p1, p2 };
         }
-        if (el.kind === 'quadratic') {
-            return { ...base, p1: den(el.points.p1), cp: den(el.points.cp), p2: den(el.points.p2) };
+        if (kind === 'quadratic') {
+            const start = el.points?.p1 ?? el.start ?? el.s;
+            const cp = el.points?.cp ?? el.control ?? el.cp;
+            const end = el.points?.p2 ?? el.end ?? el.e;
+            const p1 = den(start);
+            const p2 = den(end);
+            const control = den(cp);
+            if (!p1 || !p2 || !control) return null;
+            return { ...base, p1, cp: control, p2 };
         }
-        if (el.kind === 'shape') {
-            const segs = Array.isArray(el.segments) ? el.segments.map(seg => {
-                if (!seg || !seg.p1 || !seg.p2) return null;
-                if (seg.kind === 'quadratic' && seg.cp) {
-                    return { kind: 'quadratic', p1: den(seg.p1), cp: den(seg.cp), p2: den(seg.p2) };
-                }
-                return { kind: 'line', p1: den(seg.p1), p2: den(seg.p2) };
-            }).filter(Boolean) : [];
-            const shape = { ...base, path: (el.path || []).map(den), fill: el.fill || null, children: el.children || [] };
+        if (kind === 'shape') {
+            const pathSource = el.path ?? el.points ?? [];
+            const path = Array.isArray(pathSource)
+                ? pathSource.map(pt => den(pt)).filter(Boolean)
+                : [];
+            const segs = Array.isArray(el.segments)
+                ? el.segments.map(seg => {
+                    if (!seg || !seg.p1 || !seg.p2) return null;
+                    const p1 = den(seg.p1);
+                    const p2 = den(seg.p2);
+                    if (!p1 || !p2) return null;
+                    if ((seg.kind === 'quadratic' || seg.type === 'quadratic' || seg.type === 'curve') && seg.cp) {
+                        const cp = den(seg.cp);
+                        if (!cp) return { kind: 'line', p1, p2 };
+                        return { kind: 'quadratic', p1, cp, p2 };
+                    }
+                    return { kind: 'line', p1, p2 };
+                }).filter(Boolean)
+                : [];
+            const shape = {
+                ...base,
+                path,
+                fill: el.fill ?? style.fill ?? null,
+                children: Array.isArray(el.children) ? el.children.slice() : []
+            };
             if (segs.length) shape.segments = segs;
             return shape;
         }
-        if (el.kind === 'group') {
-            return { ...base, children: el.children?.slice() || [] };
+        if (kind === 'group') {
+            return { ...base, children: Array.isArray(el.children) ? el.children.slice() : [] };
         }
         return { ...base };
     }
@@ -709,8 +1130,8 @@ function registerFileSystem(ctx) {
     }
 
     ui.saveJSON.addEventListener('click', () => {
-        const data = exportSummary();
-        downloadBlob(JSON.stringify(data), 'drawing.simple.json');
+        const data = exportPack(false);
+        downloadBlob(JSON.stringify(data, null, 2), 'drawing.linepack.json');
     });
 
     ui.saveJSONMin.addEventListener('click', () => {
