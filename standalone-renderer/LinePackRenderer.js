@@ -188,6 +188,20 @@ function expandCompactItem(entry) {
     return base;
 }
 
+function extractRemovedIds(list) {
+    if (!Array.isArray(list)) return [];
+    return list
+        .map(entry => {
+            if (entry === null || entry === undefined) return null;
+            if (typeof entry === 'string' || typeof entry === 'number') return entry;
+            if (typeof entry === 'object') {
+                return entry.id ?? entry.i ?? entry.item ?? entry.target ?? null;
+            }
+            return null;
+        })
+        .filter(id => id !== null && id !== undefined);
+}
+
 function expandCompactKeyframe(entry) {
     if (!entry) return null;
     if (Array.isArray(entry)) {
@@ -197,11 +211,32 @@ function expandCompactKeyframe(entry) {
     if (typeof entry !== 'object') return null;
     const t = +(entry.t ?? entry.time ?? entry.sec ?? 0);
     if (!Number.isFinite(t)) return null;
-    const snapshotSource = entry.snapshot ?? entry.s ?? entry.items ?? [];
+    const snapshotSource = entry.snapshot ?? entry.s ?? entry.items ?? null;
     const snapshot = Array.isArray(snapshotSource)
         ? snapshotSource.map(expandCompactItem).filter(Boolean)
-        : [];
-    return { t, snapshot };
+        : null;
+    const updatesDefined = Object.prototype.hasOwnProperty.call(entry, 'u')
+        || Object.prototype.hasOwnProperty.call(entry, 'updates')
+        || Object.prototype.hasOwnProperty.call(entry, 'delta')
+        || Object.prototype.hasOwnProperty.call(entry, 'changes');
+    const updatesSource = updatesDefined
+        ? (entry.updates ?? entry.u ?? entry.delta ?? entry.changes ?? [])
+        : null;
+    const updates = updatesDefined
+        ? (Array.isArray(updatesSource)
+            ? updatesSource.map(expandCompactItem).filter(Boolean)
+            : [])
+        : null;
+    const removedDefined = Object.prototype.hasOwnProperty.call(entry, 'r')
+        || Object.prototype.hasOwnProperty.call(entry, 'removed')
+        || Object.prototype.hasOwnProperty.call(entry, 'x');
+    const removedSource = removedDefined
+        ? (entry.removed ?? entry.r ?? entry.x ?? [])
+        : null;
+    const removed = removedDefined
+        ? extractRemovedIds(removedSource)
+        : null;
+    return { t, snapshot, updates, removed, hasUpdates: updatesDefined, hasRemoved: removedDefined };
 }
 
 function expandCompactAnimation(entry) {
@@ -215,9 +250,67 @@ function expandCompactAnimation(entry) {
     const name = entry.name ?? entry.n ?? id ?? 'Animation';
     const duration = +(entry.duration ?? entry.d ?? 5);
     const keyframesSource = entry.keyframes ?? entry.k ?? [];
-    const keyframes = Array.isArray(keyframesSource)
+    const rawFrames = Array.isArray(keyframesSource)
         ? keyframesSource.map(expandCompactKeyframe).filter(Boolean)
         : [];
+    const keyframes = [];
+    let current = [];
+    const indexMap = new Map();
+    const rebuildIndex = () => {
+        indexMap.clear();
+        current.forEach((item, idx) => {
+            if (item && item.id) indexMap.set(item.id, idx);
+        });
+    };
+    rawFrames.forEach(frame => {
+        if (!frame) return;
+        if (Array.isArray(frame.snapshot)) {
+            const baseSnapshot = frame.snapshot.map(item => clone(item));
+            current = baseSnapshot.map(item => clone(item));
+            rebuildIndex();
+            keyframes.push({ t: frame.t, snapshot: baseSnapshot });
+            return;
+        }
+        const updatesList = Array.isArray(frame.updates) ? frame.updates : [];
+        const removedList = Array.isArray(frame.removed) ? frame.removed : [];
+        const hasHold = frame.hasUpdates || frame.hasRemoved;
+        if (!updatesList.length && !removedList.length && !hasHold) return;
+        let changed = false;
+        if (updatesList.length) {
+            updatesList.forEach(item => {
+                if (!item || !item.id) return;
+                const cloneItem = clone(item);
+                if (indexMap.has(item.id)) {
+                    const idx = indexMap.get(item.id);
+                    current[idx] = cloneItem;
+                } else {
+                    indexMap.set(item.id, current.length);
+                    current.push(cloneItem);
+                }
+                changed = true;
+            });
+        }
+        if (removedList.length) {
+            const removeSet = new Set(removedList);
+            if (removeSet.size) {
+                const next = [];
+                current.forEach(item => {
+                    if (!item || !item.id) return;
+                    if (removeSet.has(item.id)) return;
+                    next.push(item);
+                });
+                if (next.length !== current.length) {
+                    current = next;
+                    changed = true;
+                }
+                rebuildIndex();
+            }
+        }
+        if (changed) rebuildIndex();
+        if (!changed && !hasHold) return;
+        const snapshotOut = current.map(item => clone(item));
+        keyframes.push({ t: frame.t, snapshot: snapshotOut });
+    });
     return {
         id: id ?? `anim_${Math.random().toString(36).slice(2, 8)}`,
         name,
