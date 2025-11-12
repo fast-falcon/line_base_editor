@@ -767,7 +767,7 @@ function registerFileSystem(ctx) {
             const geometry = buildShapeGeometry(shapeNode, state.transform);
             if (!geometry || !Array.isArray(geometry.points) || geometry.points.length < 2) return;
             geometry.points.forEach(updateBounds);
-            pendingGeometry.push({
+            const entry = {
                 points: geometry.points,
                 closed: geometry.closed !== false,
                 segments: Array.isArray(geometry.segments) ? geometry.segments : [],
@@ -775,11 +775,13 @@ function registerFileSystem(ctx) {
                 strokeWidth: Number.isFinite(+state.strokeWidth) ? Math.max(0, +state.strokeWidth) : 0,
                 fill: geometry.closed === false ? null : state.fill,
                 layerName
-            });
+            };
+            pendingGeometry.push(entry);
+            return entry;
         };
 
         const parseGroup = (entries, incomingState, layerName) => {
-            if (!Array.isArray(entries)) return;
+            if (!Array.isArray(entries)) return [];
             const transformEntry = entries.find(entry => entry && entry.ty === 'tr');
             const baseTransform = transformEntry
                 ? multiplyMatrix(incomingState.transform, matrixFromTransform(transformEntry))
@@ -790,10 +792,26 @@ function registerFileSystem(ctx) {
                 strokeWidth: incomingState.strokeWidth,
                 fill: incomingState.fill
             };
+            const shapesInGroup = [];
+            const applyStrokeState = () => {
+                const strokeColor = state.strokeColor || DEFAULT_STROKE_COLOR;
+                const strokeWidth = Number.isFinite(+state.strokeWidth) ? Math.max(0, +state.strokeWidth) : 0;
+                shapesInGroup.forEach(shape => {
+                    shape.strokeColor = strokeColor;
+                    shape.strokeWidth = strokeWidth;
+                });
+            };
+            const applyFillState = () => {
+                const fillValue = state.fill;
+                shapesInGroup.forEach(shape => {
+                    shape.fill = shape.closed === false ? null : fillValue;
+                });
+            };
             entries.forEach(entry => {
                 if (!entry || entry.ty === 'tr') return;
                 if (entry.ty === 'gr') {
-                    parseGroup(entry.it || [], cloneState(state), layerName);
+                    const nestedShapes = parseGroup(entry.it || [], cloneState(state), layerName);
+                    shapesInGroup.push(...nestedShapes);
                     return;
                 }
                 if (entry.ty === 'st') {
@@ -806,6 +824,7 @@ function registerFileSystem(ctx) {
                         const width = numberFrom(entry.w, state.strokeWidth);
                         if (Number.isFinite(width)) state.strokeWidth = Math.max(0, width);
                     }
+                    applyStrokeState();
                     return;
                 }
                 if (entry.ty === 'gs') {
@@ -817,6 +836,7 @@ function registerFileSystem(ctx) {
                         const width = numberFrom(entry.w, state.strokeWidth);
                         if (Number.isFinite(width)) state.strokeWidth = Math.max(0, width);
                     }
+                    applyStrokeState();
                     return;
                 }
                 if (entry.ty === 'fl') {
@@ -826,17 +846,21 @@ function registerFileSystem(ctx) {
                         const fillColor = colorFrom(entry.c, state.fill || DEFAULT_STROKE_COLOR);
                         state.fill = colorWithAlpha(fillColor, opacity);
                     }
+                    applyFillState();
                     return;
                 }
                 if (entry.ty === 'gf') {
                     const opacity = opacityFrom(entry.o);
                     state.fill = opacity <= 0 ? null : gradientToColor(entry, state.fill || DEFAULT_STROKE_COLOR, opacity);
+                    applyFillState();
                     return;
                 }
                 if (entry.ty === 'sh' || entry.ty === 'rc' || entry.ty === 'el' || entry.ty === 'sr') {
-                    pushShape(entry, state, layerName);
+                    const shape = pushShape(entry, state, layerName);
+                    if (shape) shapesInGroup.push(shape);
                 }
             });
+            return shapesInGroup;
         };
 
         layers.forEach(layer => {
