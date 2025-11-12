@@ -107,9 +107,53 @@ function registerSelection(ctx) {
     function deleteSelection() {
         if (!state.selected.size) return;
         api.pushHistory && api.pushHistory();
-        state.items = state.items.filter(it => !state.selected.has(it.id));
+        const removedIds = new Set(state.selected);
+        state.items = state.items
+            .filter(it => !removedIds.has(it.id))
+            .map(it => {
+                if (Array.isArray(it.children)) {
+                    it.children = it.children.filter(id => !removedIds.has(id));
+                }
+                return it;
+            });
+
+        if (Array.isArray(state.animations) && state.animations.length) {
+            const nextAnimations = [];
+            state.animations.forEach(anim => {
+                if (!anim || !Array.isArray(anim.keyframes)) return;
+                const keyframes = [];
+                anim.keyframes.forEach(kf => {
+                    if (!kf || !Array.isArray(kf.snapshot)) return;
+                    const snapshot = kf.snapshot
+                        .filter(item => item && !removedIds.has(item.id))
+                        .map(item => {
+                            if (Array.isArray(item.children)) {
+                                item.children = item.children.filter(id => !removedIds.has(id));
+                            }
+                            return item;
+                        });
+                    if (snapshot.length) {
+                        keyframes.push({ ...kf, snapshot });
+                    }
+                });
+                if (keyframes.length) {
+                    nextAnimations.push({ ...anim, keyframes });
+                }
+            });
+            state.animations = nextAnimations;
+            if (state.currentAnimId && !state.animations.some(anim => anim.id === state.currentAnimId)) {
+                state.currentAnimId = state.animations[0]?.id || null;
+            }
+        }
+
         state.selected.clear();
+        state.tl.playing = false;
         api.refreshElemList && api.refreshElemList();
+        api.refreshAnimSelect && api.refreshAnimSelect();
+        api.rebuildTicks && api.rebuildTicks();
+        api.placeCursor && api.placeCursor();
+        api.updateGhost && api.updateGhost();
+        api.updateFillVisibility && api.updateFillVisibility();
         api.draw && api.draw();
     }
 

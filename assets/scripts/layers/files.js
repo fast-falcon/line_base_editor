@@ -51,6 +51,22 @@ function registerFileSystem(ctx) {
         return false;
     }
 
+    function stableHash(value) {
+        if (value === null) return 'null';
+        const type = typeof value;
+        if (type === 'number') return Number.isFinite(value) ? value.toFixed(6) : '0';
+        if (type === 'boolean' || type === 'string') return JSON.stringify(value);
+        if (Array.isArray(value)) {
+            return `[${value.map(stableHash).join(',')}]`;
+        }
+        if (type === 'object') {
+            const keys = Object.keys(value).sort();
+            const inner = keys.map(key => `${JSON.stringify(key)}:${stableHash(value[key])}`).join(',');
+            return `{${inner}}`;
+        }
+        return '';
+    }
+
     function diffSimplified(prev, next) {
         const diff = {};
         const keys = new Set([
@@ -1445,6 +1461,18 @@ function registerFileSystem(ctx) {
         return base;
     };
 
+    const extractRemovedIds = (list) => {
+        if (!Array.isArray(list)) return [];
+        return list.map(entry => {
+            if (entry === null || entry === undefined) return null;
+            if (typeof entry === 'string' || typeof entry === 'number') return entry;
+            if (typeof entry === 'object') {
+                return entry.id ?? entry.i ?? entry.item ?? entry.target ?? null;
+            }
+            return null;
+        }).filter(id => id !== null && id !== undefined);
+    };
+
     const expandCompactKeyframe = (entry) => {
         if (!entry) return null;
         if (Array.isArray(entry)) {
@@ -1454,11 +1482,32 @@ function registerFileSystem(ctx) {
         if (typeof entry !== 'object') return null;
         const t = +(entry.t ?? entry.time ?? entry.sec ?? 0);
         if (!Number.isFinite(t)) return null;
-        const snapshotSource = entry.snapshot ?? entry.s ?? entry.items ?? [];
+        const snapshotSource = entry.snapshot ?? entry.s ?? entry.items ?? null;
         const snapshot = Array.isArray(snapshotSource)
             ? snapshotSource.map(expandCompactItem).filter(Boolean)
-            : [];
-        return { t, snapshot };
+            : null;
+        const updatesDefined = Object.prototype.hasOwnProperty.call(entry, 'u')
+            || Object.prototype.hasOwnProperty.call(entry, 'updates')
+            || Object.prototype.hasOwnProperty.call(entry, 'delta')
+            || Object.prototype.hasOwnProperty.call(entry, 'changes');
+        const updatesSource = updatesDefined
+            ? (entry.updates ?? entry.u ?? entry.delta ?? entry.changes ?? [])
+            : null;
+        const updates = updatesDefined
+            ? (Array.isArray(updatesSource)
+                ? updatesSource.map(expandCompactItem).filter(Boolean)
+                : [])
+            : null;
+        const removedDefined = Object.prototype.hasOwnProperty.call(entry, 'r')
+            || Object.prototype.hasOwnProperty.call(entry, 'removed')
+            || Object.prototype.hasOwnProperty.call(entry, 'x');
+        const removedSource = removedDefined
+            ? (entry.removed ?? entry.r ?? entry.x ?? [])
+            : null;
+        const removed = removedDefined
+            ? extractRemovedIds(removedSource)
+            : null;
+        return { t, snapshot, updates, removed, hasUpdates: updatesDefined, hasRemoved: removedDefined };
     };
 
     const expandCompactAnimation = (entry) => {
@@ -1472,9 +1521,67 @@ function registerFileSystem(ctx) {
         const name = entry.name ?? entry.n ?? id ?? 'Animation';
         const duration = +(entry.duration ?? entry.d ?? 5);
         const keyframesSource = entry.keyframes ?? entry.k ?? [];
-        const keyframes = Array.isArray(keyframesSource)
+        const rawFrames = Array.isArray(keyframesSource)
             ? keyframesSource.map(expandCompactKeyframe).filter(Boolean)
             : [];
+        const keyframes = [];
+        let current = [];
+        const indexMap = new Map();
+        const rebuildIndex = () => {
+            indexMap.clear();
+            current.forEach((item, idx) => {
+                if (item && item.id) indexMap.set(item.id, idx);
+            });
+        };
+        rawFrames.forEach(frame => {
+            if (!frame) return;
+            if (Array.isArray(frame.snapshot)) {
+                const baseSnapshot = frame.snapshot.map(item => cloneValue(item));
+                current = baseSnapshot.map(item => cloneValue(item));
+                rebuildIndex();
+                keyframes.push({ t: frame.t, snapshot: baseSnapshot });
+                return;
+            }
+            const updatesList = Array.isArray(frame.updates) ? frame.updates : [];
+            const removedList = Array.isArray(frame.removed) ? frame.removed : [];
+            const hasHold = frame.hasUpdates || frame.hasRemoved;
+            if (!updatesList.length && !removedList.length && !hasHold) return;
+            let changed = false;
+            if (updatesList.length) {
+                updatesList.forEach(item => {
+                    if (!item || !item.id) return;
+                    const cloneItem = cloneValue(item);
+                    if (indexMap.has(item.id)) {
+                        const idx = indexMap.get(item.id);
+                        current[idx] = cloneItem;
+                    } else {
+                        indexMap.set(item.id, current.length);
+                        current.push(cloneItem);
+                    }
+                    changed = true;
+                });
+            }
+            if (removedList.length) {
+                const removeSet = new Set(removedList);
+                if (removeSet.size) {
+                    const next = [];
+                    current.forEach(item => {
+                        if (!item || !item.id) return;
+                        if (removeSet.has(item.id)) return;
+                        next.push(item);
+                    });
+                    if (next.length !== current.length) {
+                        current = next;
+                        changed = true;
+                    }
+                    rebuildIndex();
+                }
+            }
+            if (changed) rebuildIndex();
+            if (!changed && !hasHold) return;
+            const snapshotOut = current.map(item => cloneValue(item));
+            keyframes.push({ t: frame.t, snapshot: snapshotOut });
+        });
         return {
             id: id ?? `anim_${Math.random().toString(36).slice(2, 8)}`,
             name,
@@ -1868,6 +1975,42 @@ function registerFileSystem(ctx) {
         api.placeCursor && api.placeCursor();
     };
 
+    function compressCompactKeyframes(frames) {
+        if (!Array.isArray(frames)) return [];
+        const hashes = new Map();
+        let prevOrder = [];
+        return frames.map((frame, index) => {
+            const time = Number.isFinite(+frame.t) ? +frame.t : 0;
+            const snapshot = Array.isArray(frame.s) ? frame.s : [];
+            const seen = [];
+            const seenSet = new Set();
+            const updates = [];
+            snapshot.forEach(item => {
+                if (!item || !item.i) return;
+                seen.push(item.i);
+                seenSet.add(item.i);
+                const hash = stableHash(item);
+                if (hashes.get(item.i) !== hash) {
+                    updates.push(item);
+                    hashes.set(item.i, hash);
+                }
+            });
+            const removed = prevOrder.filter(id => !seenSet.has(id));
+            if (removed.length) {
+                removed.forEach(id => hashes.delete(id));
+            }
+            const entry = { t: time };
+            if (index === 0 || !prevOrder.length) {
+                entry.s = snapshot;
+            } else {
+                entry.u = updates;
+                if (removed.length) entry.r = removed;
+            }
+            prevOrder = seen;
+            return entry;
+        });
+    }
+
     function exportPack(minimal = false) {
         const { w, h } = api.getCSSSize ? api.getCSSSize() : { w: canvas.width, h: canvas.height };
         if (minimal) {
@@ -1875,10 +2018,11 @@ function registerFileSystem(ctx) {
                 .map(it => serializeItemCompact(it, w, h))
                 .filter(Boolean);
             const animations = state.animations.map(anim => {
-                const keyframes = (anim.keyframes || []).map(k => ({
+                const rawFrames = (anim.keyframes || []).map(k => ({
                     t: Number.isFinite(+k.t) ? +(+k.t).toFixed(3) : 0,
                     s: (k.snapshot || []).map(it => serializeItemCompact(it, w, h)).filter(Boolean)
                 }));
+                const keyframes = compressCompactKeyframes(rawFrames);
                 return {
                     i: anim.id,
                     n: anim.name,
