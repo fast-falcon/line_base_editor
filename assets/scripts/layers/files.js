@@ -246,88 +246,157 @@ function registerFileSystem(ctx) {
         return prop;
     };
 
-    const numberFrom = (prop, fallback = 0) => {
-        if (prop && typeof prop === 'object' && prop.x !== undefined && prop.y === undefined) {
-            return numberFrom(prop.x, fallback);
+    const extractKeyframeValue = (frameEntry) => {
+        if (!frameEntry) return null;
+        if (frameEntry.s !== undefined) {
+            const source = frameEntry.s;
+            if (Array.isArray(source) && source.length === 1) return cloneValue(source[0]);
+            return cloneValue(source);
         }
-        const value = staticValue(prop);
-        if (value === null || value === undefined) return fallback;
-        const num = Array.isArray(value) ? +value[0] : +value;
-        return Number.isFinite(num) ? num : fallback;
+        if (frameEntry.v !== undefined) return cloneValue(frameEntry.v);
+        return cloneValue(frameEntry);
     };
 
-    const pointFrom = (prop) => {
-        if (!prop || typeof prop !== 'object') {
-            const num = numberFrom(prop, 0);
+    const valueAtKeyframes = (frames, frame) => {
+        if (!Array.isArray(frames) || !frames.length) return null;
+        let previous = frames[0];
+        let prevTime = Number.isFinite(+previous.t) ? +previous.t : null;
+        if (prevTime === null) {
+            return extractKeyframeValue(previous);
+        }
+        if (!Number.isFinite(frame) || frame <= prevTime) {
+            return extractKeyframeValue(previous);
+        }
+        for (let i = 1; i < frames.length; i++) {
+            const current = frames[i];
+            const currentTime = Number.isFinite(+current.t) ? +current.t : null;
+            if (currentTime === null) continue;
+            if (frame < currentTime) {
+                return extractKeyframeValue(previous);
+            }
+            previous = current;
+        }
+        return extractKeyframeValue(previous);
+    };
+
+    const valueAt = (prop, frame, fallback = null) => {
+        if (prop === null || prop === undefined) return fallback;
+        if (frame === null || frame === undefined) {
+            const value = staticValue(prop);
+            return value === undefined ? fallback : value;
+        }
+        if (typeof prop === 'object') {
+            if (prop.a && Array.isArray(prop.k)) {
+                const evaluated = valueAtKeyframes(prop.k, frame);
+                if (evaluated !== null && evaluated !== undefined) return evaluated;
+            }
+            if (prop.k && typeof prop.k === 'object' && prop.k.a && Array.isArray(prop.k.k)) {
+                const evaluatedNested = valueAtKeyframes(prop.k.k, frame);
+                if (evaluatedNested !== null && evaluatedNested !== undefined) return evaluatedNested;
+            }
+        }
+        const value = staticValue(prop);
+        return value === undefined ? fallback : value;
+    };
+
+    const toNumber = (value, fallback = 0) => {
+        if (Number.isFinite(+value)) return +value;
+        return fallback;
+    };
+
+    const pointValue = (value, fallback = { x: 0, y: 0 }) => {
+        if (value === null || value === undefined) return { x: fallback.x, y: fallback.y };
+        if (typeof value === 'object' && value.x !== undefined && value.y !== undefined) {
+            return {
+                x: toNumber(value.x, fallback.x),
+                y: toNumber(value.y, fallback.y)
+            };
+        }
+        if (Array.isArray(value)) {
+            const x = toNumber(value[0], fallback.x);
+            const y = toNumber(value[1], fallback.y);
+            return { x, y };
+        }
+        if (Number.isFinite(+value)) {
+            const num = +value;
             return { x: num, y: 0 };
         }
-        if (prop.x !== undefined && prop.y !== undefined) {
-            return {
-                x: numberFrom(prop.x, 0),
-                y: numberFrom(prop.y, 0)
-            };
-        }
-        const value = staticValue(prop);
-        if (Array.isArray(value)) {
-            const x = Number.isFinite(+value[0]) ? +value[0] : 0;
-            const y = Number.isFinite(+value[1]) ? +value[1] : 0;
-            return { x, y };
-        }
-        if (value && typeof value === 'object') {
-            const x = Number.isFinite(+(value.x ?? value[0])) ? +(value.x ?? value[0]) : 0;
-            const y = Number.isFinite(+(value.y ?? value[1])) ? +(value.y ?? value[1]) : 0;
-            return { x, y };
-        }
-        const num = numberFrom(value, 0);
-        return { x: num, y: 0 };
+        return { x: fallback.x, y: fallback.y };
     };
 
-    const scaleFrom = (prop) => {
-        if (prop && typeof prop === 'object' && prop.x !== undefined && prop.y !== undefined && !('k' in prop)) {
+    const numberFrom = (prop, fallback = 0, frame = null) => {
+        if (prop && typeof prop === 'object' && prop.x !== undefined && prop.y === undefined) {
+            return numberFrom(prop.x, fallback, frame);
+        }
+        const value = valueAt(prop, frame, null);
+        if (Array.isArray(value)) {
+            const candidate = value.find(v => Number.isFinite(+v));
+            if (candidate !== undefined) return +candidate;
+        }
+        if (value && typeof value === 'object' && value.x !== undefined) {
+            return numberFrom(value.x, fallback, frame);
+        }
+        if (Number.isFinite(+value)) return +value;
+        return fallback;
+    };
+
+    const pointFrom = (prop, frame = null, fallback = { x: 0, y: 0 }) => {
+        if (prop && typeof prop === 'object' && prop.x !== undefined && prop.y !== undefined) {
             return {
-                x: numberFrom(prop.x, 100) / 100,
-                y: numberFrom(prop.y, 100) / 100
+                x: numberFrom(prop.x, fallback.x, frame),
+                y: numberFrom(prop.y, fallback.y, frame)
             };
         }
-        const value = staticValue(prop);
+        const value = valueAt(prop, frame, null);
+        return pointValue(value, fallback);
+    };
+
+    const scaleFrom = (prop, frame = null) => {
+        if (prop && typeof prop === 'object' && prop.x !== undefined && prop.y !== undefined && !('k' in prop)) {
+            return {
+                x: numberFrom(prop.x, 100, frame) / 100,
+                y: numberFrom(prop.y, 100, frame) / 100
+            };
+        }
+        const value = valueAt(prop, frame, null);
         if (Array.isArray(value)) {
-            const sx = Number.isFinite(+value[0]) ? +value[0] : 100;
-            const sy = Number.isFinite(+value[1]) ? +value[1] : sx;
+            const sx = toNumber(value[0], 100);
+            const sy = toNumber(value[1], sx);
             return { x: sx / 100, y: sy / 100 };
         }
         if (value && typeof value === 'object') {
-            const sx = Number.isFinite(+(value.x ?? value[0])) ? +(value.x ?? value[0]) : 100;
-            const sy = Number.isFinite(+(value.y ?? value[1])) ? +(value.y ?? value[1]) : sx;
+            const sx = toNumber(value.x ?? value[0], 100);
+            const sy = toNumber(value.y ?? value[1], sx);
             return { x: sx / 100, y: sy / 100 };
         }
-        const num = numberFrom(value, 100);
+        const num = numberFrom(value, 100, frame);
         const ratio = num / 100;
         return { x: ratio, y: ratio };
     };
 
-    const opacityFrom = (prop) => {
-        const value = numberFrom(prop, 100);
+    const opacityFrom = (prop, frame = null) => {
+        const value = numberFrom(prop, 100, frame);
         return Number.isFinite(value) ? value / 100 : 1;
     };
 
-    const colorFrom = (prop, fallback = DEFAULT_STROKE_COLOR) => {
-        const value = staticValue(prop);
+    const normalizeColorValue = (value, fallback = DEFAULT_STROKE_COLOR) => {
         if (Array.isArray(value)) {
-            const [r, g, b] = value;
-            if ([r, g, b].some(v => v === undefined)) return fallback;
             const toByte = (val) => {
                 if (!Number.isFinite(val)) return 0;
                 const scaled = (val <= 1 && val >= 0) ? val * 255 : val;
                 return clampByte(scaled);
             };
-            return `#${byteToHex(toByte(+r))}${byteToHex(toByte(+g))}${byteToHex(toByte(+b))}`;
+            const r = toByte(value[0]);
+            const g = toByte(value[1] ?? value[0]);
+            const b = toByte(value[2] ?? value[0]);
+            return `#${byteToHex(r)}${byteToHex(g)}${byteToHex(b)}`;
         }
         if (value && typeof value === 'object') {
             const r = value.r ?? value.red ?? value[0];
             const g = value.g ?? value.green ?? value[1];
             const b = value.b ?? value.blue ?? value[2];
             if ([r, g, b].some(v => v === undefined)) return fallback;
-            return colorFrom([+r, +g, +b], fallback);
+            return normalizeColorValue([+r, +g, +b], fallback);
         }
         if (typeof value === 'string') {
             const parsed = parseColorString(value);
@@ -335,7 +404,17 @@ function registerFileSystem(ctx) {
                 return `#${byteToHex(parsed.r)}${byteToHex(parsed.g)}${byteToHex(parsed.b)}`;
             }
         }
+        if (Number.isFinite(+value)) {
+            const channel = clampByte(+value);
+            return `#${byteToHex(channel)}${byteToHex(channel)}${byteToHex(channel)}`;
+        }
         return fallback;
+    };
+
+    const colorFrom = (prop, fallback = DEFAULT_STROKE_COLOR, frame = null) => {
+        const value = valueAt(prop, frame, null);
+        if (value === null || value === undefined) return fallback;
+        return normalizeColorValue(value, fallback);
     };
 
     const colorWithAlpha = (color, alpha) => {
@@ -348,14 +427,14 @@ function registerFileSystem(ctx) {
         return `rgba(${parsed.r},${parsed.g},${parsed.b},${rounded})`;
     };
 
-    const gradientStopsFrom = (entry) => {
+    const gradientStopsFrom = (entry, frame = null) => {
         if (!entry || typeof entry !== 'object') return [];
         const gradient = entry.g || entry;
         if (!gradient) return [];
         const rawValue = gradient.k;
-        let stopsArray = staticValue(rawValue);
+        let stopsArray = valueAt(rawValue, frame, null);
         if (!Array.isArray(stopsArray) && rawValue && typeof rawValue === 'object') {
-            stopsArray = staticValue(rawValue.k);
+            stopsArray = valueAt(rawValue.k, frame, null);
         }
         if (!Array.isArray(stopsArray)) return [];
         const pointCount = Number.isFinite(+gradient.p) ? +gradient.p : Math.floor(stopsArray.length / 4);
@@ -367,7 +446,7 @@ function registerFileSystem(ctx) {
             const r = stopsArray[idx + 1];
             const g = stopsArray[idx + 2];
             const b = stopsArray[idx + 3];
-            const color = colorFrom([r, g, b], null);
+            const color = normalizeColorValue([r, g, b], null);
             if (!color) continue;
             colorStops.push({ pos, color, alpha: 1 });
         }
@@ -402,8 +481,8 @@ function registerFileSystem(ctx) {
         });
     };
 
-    const gradientToColor = (entry, fallback = DEFAULT_STROKE_COLOR, opacityMultiplier = 1) => {
-        const stops = gradientStopsFrom(entry);
+    const gradientToColor = (entry, fallback = DEFAULT_STROKE_COLOR, opacityMultiplier = 1, frame = null) => {
+        const stops = gradientStopsFrom(entry, frame);
         if (!stops.length) return colorWithAlpha(fallback, opacityMultiplier);
         let accumR = 0;
         let accumG = 0;
@@ -428,12 +507,12 @@ function registerFileSystem(ctx) {
         return colorWithAlpha(avgColor, avgAlpha * opacityMultiplier);
     };
 
-    const matrixFromTransform = (entry) => {
+    const matrixFromTransform = (entry, frame = null) => {
         if (!entry || typeof entry !== 'object') return identityMatrix();
-        const anchor = pointFrom(entry.a);
-        const position = pointFrom(entry.p);
-        const scale = scaleFrom(entry.s);
-        const rotation = numberFrom(entry.r ?? entry.z ?? entry.rx ?? entry.ry, 0);
+        const anchor = pointFrom(entry.a, frame);
+        const position = pointFrom(entry.p, frame);
+        const scale = scaleFrom(entry.s, frame);
+        const rotation = numberFrom(entry.r ?? entry.z ?? entry.rx ?? entry.ry, 0, frame);
         let matrix = identityMatrix();
         matrix = multiplyMatrix(matrix, translateMatrix(position.x, position.y));
         if (Math.abs(rotation) > EPSILON) matrix = multiplyMatrix(matrix, rotateMatrix(rotation));
@@ -450,9 +529,9 @@ function registerFileSystem(ctx) {
         return false;
     };
 
-    const resolvePathValue = (raw) => {
+    const resolvePathValue = (raw, frame = null) => {
         if (!raw) return null;
-        let pathValue = staticValue(raw);
+        let pathValue = valueAt(raw, frame, null);
         if ((!pathValue || !pathValue.v) && Array.isArray(raw.k) && raw.k.length) {
             const first = raw.k[0];
             if (first && typeof first === 'object') {
@@ -461,7 +540,7 @@ function registerFileSystem(ctx) {
             }
         }
         if (!pathValue || !Array.isArray(pathValue.v)) return null;
-        return pathValue;
+        return cloneValue(pathValue);
     };
 
     const geometryFromPathValue = (pathValue, matrix) => {
@@ -523,16 +602,16 @@ function registerFileSystem(ctx) {
         return worldPoints.length >= 2 ? { points: worldPoints, segments, closed } : null;
     };
 
-    const geometryFromRectangle = (entry, matrix) => {
-        const size = pointFrom(entry.s);
-        const position = pointFrom(entry.p);
+    const geometryFromRectangle = (entry, matrix, frame) => {
+        const size = pointFrom(entry.s, frame);
+        const position = pointFrom(entry.p, frame);
         if (!size || !position) return null;
         const width = Number.isFinite(+size.x) ? +size.x : 0;
         const height = Number.isFinite(+size.y) ? +size.y : 0;
         if (Math.abs(width) <= EPSILON || Math.abs(height) <= EPSILON) return null;
         const halfW = width / 2;
         const halfH = height / 2;
-        const radiusRaw = Math.abs(numberFrom(entry.r, 0));
+        const radiusRaw = Math.abs(numberFrom(entry.r, 0, frame));
         const radius = Math.min(radiusRaw, Math.abs(halfW), Math.abs(halfH));
         const localPoints = [];
 
@@ -594,9 +673,9 @@ function registerFileSystem(ctx) {
         return buildGeometryFromPoints(localPoints, matrix, true);
     };
 
-    const geometryFromEllipse = (entry, matrix) => {
-        const size = pointFrom(entry.s);
-        const position = pointFrom(entry.p);
+    const geometryFromEllipse = (entry, matrix, frame) => {
+        const size = pointFrom(entry.s, frame);
+        const position = pointFrom(entry.p, frame);
         if (!size || !position) return null;
         const width = Number.isFinite(+size.x) ? +size.x : 0;
         const height = Number.isFinite(+size.y) ? +size.y : 0;
@@ -615,18 +694,18 @@ function registerFileSystem(ctx) {
         return buildGeometryFromPoints(localPoints, matrix, true);
     };
 
-    const geometryFromPolystar = (entry, matrix) => {
-        const position = pointFrom(entry.p);
+    const geometryFromPolystar = (entry, matrix, frame) => {
+        const position = pointFrom(entry.p, frame);
         if (!position) return null;
-        const pointCount = Math.max(3, Math.round(numberFrom(entry.pt, 5)));
-        const outerRadius = Math.abs(numberFrom(entry.or, numberFrom(entry.r, 0)));
+        const pointCount = Math.max(3, Math.round(numberFrom(entry.pt, 5, frame)));
+        const outerRadius = Math.abs(numberFrom(entry.or, numberFrom(entry.r, 0, frame), frame));
         if (!Number.isFinite(outerRadius) || outerRadius <= EPSILON) return null;
-        const innerRadiusRaw = numberFrom(entry.ir, outerRadius / 2);
+        const innerRadiusRaw = numberFrom(entry.ir, outerRadius / 2, frame);
         const type = entry.sy === 2 ? 'polygon' : 'star';
         const isStar = type === 'star' && Number.isFinite(innerRadiusRaw) && innerRadiusRaw > EPSILON;
         const innerRadius = isStar ? Math.min(Math.abs(innerRadiusRaw), Math.abs(outerRadius)) : outerRadius;
         const totalPoints = isStar ? pointCount * 2 : pointCount;
-        const rotationDeg = numberFrom(entry.r, 0);
+        const rotationDeg = numberFrom(entry.r, 0, frame);
         const rotation = (rotationDeg - 90) * Math.PI / 180;
         const dir = (entry.d === 3 || entry.d === -1) ? -1 : 1;
         const localPoints = [];
@@ -640,22 +719,86 @@ function registerFileSystem(ctx) {
         return buildGeometryFromPoints(localPoints, matrix, true);
     };
 
-    const buildShapeGeometry = (entry, matrix) => {
+    const buildShapeGeometry = (entry, matrix, frame) => {
         if (!entry) return null;
         if (entry.ty === 'sh') {
-            const pathValue = resolvePathValue(entry.ks);
+            const pathValue = resolvePathValue(entry.ks, frame);
             return geometryFromPathValue(pathValue, matrix);
         }
         if (entry.ty === 'rc') {
-            return geometryFromRectangle(entry, matrix);
+            return geometryFromRectangle(entry, matrix, frame);
         }
         if (entry.ty === 'el') {
-            return geometryFromEllipse(entry, matrix);
+            return geometryFromEllipse(entry, matrix, frame);
         }
         if (entry.ty === 'sr') {
-            return geometryFromPolystar(entry, matrix);
+            return geometryFromPolystar(entry, matrix, frame);
         }
         return null;
+    };
+
+    const collectKeyframeTimes = (prop, set) => {
+        if (!prop || typeof prop !== 'object') return;
+        const addFromArray = (arr) => {
+            if (!Array.isArray(arr)) return;
+            arr.forEach(entry => {
+                const time = Number.isFinite(+entry?.t) ? +entry.t : null;
+                if (time !== null) set.add(time);
+            });
+        };
+        if (prop.a && Array.isArray(prop.k)) addFromArray(prop.k);
+        if (prop.k && typeof prop.k === 'object') {
+            if (Array.isArray(prop.k)) addFromArray(prop.k);
+            if (prop.k.a && Array.isArray(prop.k.k)) addFromArray(prop.k.k);
+        }
+        if (prop.x && typeof prop.x === 'object') collectKeyframeTimes(prop.x, set);
+        if (prop.y && typeof prop.y === 'object') collectKeyframeTimes(prop.y, set);
+        if (prop.z && typeof prop.z === 'object') collectKeyframeTimes(prop.z, set);
+    };
+
+    const collectTransformTimes = (transform, set) => {
+        if (!transform || typeof transform !== 'object') return;
+        ['a', 'p', 's', 'r', 'rx', 'ry', 'rz', 'o'].forEach(key => {
+            if (transform[key] !== undefined) collectKeyframeTimes(transform[key], set);
+        });
+    };
+
+    const collectShapeTimes = (entries, set) => {
+        if (!Array.isArray(entries)) return;
+        entries.forEach(entry => {
+            if (!entry || typeof entry !== 'object') return;
+            if (entry.ty === 'tr') {
+                collectTransformTimes(entry, set);
+                return;
+            }
+            if (entry.ty === 'gr') {
+                collectShapeTimes(entry.it || [], set);
+                return;
+            }
+            if (entry.ty === 'sh') {
+                collectKeyframeTimes(entry.ks, set);
+                return;
+            }
+            if (entry.ty === 'rc' || entry.ty === 'el' || entry.ty === 'sr') {
+                collectKeyframeTimes(entry.s, set);
+                collectKeyframeTimes(entry.p, set);
+                collectKeyframeTimes(entry.r, set);
+                collectKeyframeTimes(entry.or, set);
+                collectKeyframeTimes(entry.ir, set);
+                collectKeyframeTimes(entry.pt, set);
+                return;
+            }
+            if (entry.ty === 'st' || entry.ty === 'gs') {
+                collectKeyframeTimes(entry.c, set);
+                collectKeyframeTimes(entry.o, set);
+                collectKeyframeTimes(entry.w, set);
+                return;
+            }
+            if (entry.ty === 'fl' || entry.ty === 'gf') {
+                collectKeyframeTimes(entry.c, set);
+                collectKeyframeTimes(entry.o, set);
+            }
+        });
     };
 
     const convertLottieToPack = (data) => {
@@ -693,20 +836,10 @@ function registerFileSystem(ctx) {
         );
         if (!Number.isFinite(uniformScale) || uniformScale <= 0) uniformScale = 1;
 
-        const transformCache = new Map();
-        const layerWorldMatrix = (layer) => {
-            if (!layer) return identityMatrix();
-            if (transformCache.has(layer.ind)) return transformCache.get(layer.ind);
-            let matrix = matrixFromTransform(layer.ks);
-            if (Number.isFinite(+layer.parent)) {
-                const parent = layerMap.get(+layer.parent);
-                if (parent) {
-                    matrix = multiplyMatrix(layerWorldMatrix(parent), matrix);
-                }
-            }
-            transformCache.set(layer.ind, matrix);
-            return matrix;
-        };
+        const frameRate = Number.isFinite(+data.fr) && +data.fr > 0 ? +data.fr : 30;
+        const inPoint = Number.isFinite(+data.ip) ? +data.ip : 0;
+        const outPointRaw = Number.isFinite(+data.op) ? +data.op : inPoint + frameRate;
+        const outPoint = outPointRaw > inPoint ? outPointRaw : inPoint + frameRate;
 
         const norm = (value, denom) => {
             if (!Number.isFinite(value) || !Number.isFinite(denom) || denom === 0) return 0;
@@ -720,10 +853,6 @@ function registerFileSystem(ctx) {
             fill: state.fill
         });
 
-        const items = [];
-        const pendingGeometry = [];
-        const groupByLayer = new Map();
-        const layerCounts = new Map();
         const bounds = {
             minX: Infinity,
             minY: Infinity,
@@ -739,147 +868,199 @@ function registerFileSystem(ctx) {
             bounds.maxY = Math.max(bounds.maxY, pt.y);
         };
 
-        const ensureLayerGroup = (rawName) => {
-            if (!rawName) return null;
-            const key = String(rawName).trim();
-            if (!key) return null;
-            if (!groupByLayer.has(key)) {
-                const group = {
-                    id: rndId('lg'),
-                    type: 'group',
-                    kind: 'group',
-                    name: key,
-                    color: DEFAULT_STROKE_COLOR,
-                    width: 0,
-                    rot: 0,
-                    visible: true,
-                    children: []
-                };
-                groupByLayer.set(key, group);
-                items.push(group);
-            }
-            return groupByLayer.get(key);
-        };
-
-        const pushShape = (shapeNode, state, layerName) => {
-            if (!shapeNode || typeof shapeNode !== 'object') return;
-            if (shapeNode.hd) return;
-            const geometry = buildShapeGeometry(shapeNode, state.transform);
-            if (!geometry || !Array.isArray(geometry.points) || geometry.points.length < 2) return;
-            geometry.points.forEach(updateBounds);
-            const entry = {
-                points: geometry.points,
-                closed: geometry.closed !== false,
-                segments: Array.isArray(geometry.segments) ? geometry.segments : [],
-                strokeColor: state.strokeColor || DEFAULT_STROKE_COLOR,
-                strokeWidth: Number.isFinite(+state.strokeWidth) ? Math.max(0, +state.strokeWidth) : 0,
-                fill: geometry.closed === false ? null : state.fill,
-                layerName
-            };
-            pendingGeometry.push(entry);
-            return entry;
-        };
-
-        const parseGroup = (entries, incomingState, layerName) => {
-            if (!Array.isArray(entries)) return [];
-            const transformEntry = entries.find(entry => entry && entry.ty === 'tr');
-            const baseTransform = transformEntry
-                ? multiplyMatrix(incomingState.transform, matrixFromTransform(transformEntry))
-                : incomingState.transform;
-            const state = {
-                transform: baseTransform,
-                strokeColor: incomingState.strokeColor,
-                strokeWidth: incomingState.strokeWidth,
-                fill: incomingState.fill
-            };
-            const shapesInGroup = [];
-            const applyStrokeState = () => {
-                const strokeColor = state.strokeColor || DEFAULT_STROKE_COLOR;
-                const strokeWidth = Number.isFinite(+state.strokeWidth) ? Math.max(0, +state.strokeWidth) : 0;
-                shapesInGroup.forEach(shape => {
-                    shape.strokeColor = strokeColor;
-                    shape.strokeWidth = strokeWidth;
-                });
-            };
-            const applyFillState = () => {
-                const fillValue = state.fill;
-                shapesInGroup.forEach(shape => {
-                    shape.fill = shape.closed === false ? null : fillValue;
-                });
-            };
-            entries.forEach(entry => {
-                if (!entry || entry.ty === 'tr') return;
-                if (entry.ty === 'gr') {
-                    const nestedShapes = parseGroup(entry.it || [], cloneState(state), layerName);
-                    shapesInGroup.push(...nestedShapes);
-                    return;
-                }
-                if (entry.ty === 'st') {
-                    const opacity = opacityFrom(entry.o);
-                    if (opacity <= 0) {
-                        state.strokeWidth = 0;
-                    } else {
-                        const strokeColor = colorFrom(entry.c, state.strokeColor || DEFAULT_STROKE_COLOR);
-                        state.strokeColor = colorWithAlpha(strokeColor, opacity);
-                        const width = numberFrom(entry.w, state.strokeWidth);
-                        if (Number.isFinite(width)) state.strokeWidth = Math.max(0, width);
-                    }
-                    applyStrokeState();
-                    return;
-                }
-                if (entry.ty === 'gs') {
-                    const opacity = opacityFrom(entry.o);
-                    if (opacity <= 0) {
-                        state.strokeWidth = 0;
-                    } else {
-                        state.strokeColor = gradientToColor(entry, state.strokeColor || DEFAULT_STROKE_COLOR, opacity);
-                        const width = numberFrom(entry.w, state.strokeWidth);
-                        if (Number.isFinite(width)) state.strokeWidth = Math.max(0, width);
-                    }
-                    applyStrokeState();
-                    return;
-                }
-                if (entry.ty === 'fl') {
-                    const opacity = opacityFrom(entry.o);
-                    if (opacity <= 0) state.fill = null;
-                    else {
-                        const fillColor = colorFrom(entry.c, state.fill || DEFAULT_STROKE_COLOR);
-                        state.fill = colorWithAlpha(fillColor, opacity);
-                    }
-                    applyFillState();
-                    return;
-                }
-                if (entry.ty === 'gf') {
-                    const opacity = opacityFrom(entry.o);
-                    state.fill = opacity <= 0 ? null : gradientToColor(entry, state.fill || DEFAULT_STROKE_COLOR, opacity);
-                    applyFillState();
-                    return;
-                }
-                if (entry.ty === 'sh' || entry.ty === 'rc' || entry.ty === 'el' || entry.ty === 'sr') {
-                    const shape = pushShape(entry, state, layerName);
-                    if (shape) shapesInGroup.push(shape);
-                }
-            });
-            return shapesInGroup;
-        };
-
+        const frameSet = new Set([inPoint, outPoint]);
         layers.forEach(layer => {
-            if (!layer || layer.ty !== 4) return;
-            if (layer.hd || layer.tt) return;
-            const opacity = opacityFrom(layer.ks?.o);
-            if (opacity <= 0) return;
-            const layerMatrix = layerWorldMatrix(layer);
-            const baseState = {
-                transform: layerMatrix,
-                strokeColor: DEFAULT_STROKE_COLOR,
-                strokeWidth: 0,
-                fill: null
+            if (!layer) return;
+            collectTransformTimes(layer.ks, frameSet);
+            collectShapeTimes(layer.shapes || [], frameSet);
+        });
+
+        const clampedFrames = new Set();
+        frameSet.forEach(time => {
+            if (!Number.isFinite(time)) return;
+            const clamped = Math.max(inPoint, Math.min(outPoint, time));
+            clampedFrames.add(clamped);
+        });
+        if (!clampedFrames.size) {
+            clampedFrames.add(inPoint);
+            clampedFrames.add(outPoint);
+        }
+        const sampleFrames = Array.from(clampedFrames).sort((a, b) => a - b);
+        if (sampleFrames.length === 1 && sampleFrames[0] !== outPoint) sampleFrames.push(outPoint);
+
+        const frameSamples = new Map();
+
+        const sampleFrame = (frame) => {
+            const shapes = [];
+            const transformCache = new Map();
+            const layerSequences = new Map();
+
+            const layerWorldMatrix = (layer) => {
+                if (!layer) return identityMatrix();
+                const cacheKey = Number.isFinite(+layer.ind) ? +layer.ind : layer;
+                if (transformCache.has(cacheKey)) return transformCache.get(cacheKey);
+                let matrix = matrixFromTransform(layer.ks, frame);
+                if (Number.isFinite(+layer.parent)) {
+                    const parent = layerMap.get(+layer.parent);
+                    if (parent) {
+                        matrix = multiplyMatrix(layerWorldMatrix(parent), matrix);
+                    }
+                }
+                transformCache.set(cacheKey, matrix);
+                return matrix;
             };
-            parseGroup(layer.shapes || [], baseState, layer.nm);
+
+            const pushShape = (shapeNode, state, layerMeta) => {
+                if (!shapeNode || typeof shapeNode !== 'object' || shapeNode.hd) return null;
+                const geometry = buildShapeGeometry(shapeNode, state.transform, frame);
+                if (!geometry || !Array.isArray(geometry.points) || geometry.points.length < 2) return null;
+                geometry.points.forEach(updateBounds);
+                const layerKey = layerMeta.key;
+                const seq = (layerSequences.get(layerKey) || 0) + 1;
+                layerSequences.set(layerKey, seq);
+                const entry = {
+                    key: `${layerKey}#${seq}`,
+                    layerName: layerMeta.name,
+                    layerKey,
+                    sequence: seq,
+                    points: geometry.points,
+                    closed: geometry.closed !== false,
+                    segments: Array.isArray(geometry.segments) ? geometry.segments : [],
+                    strokeColor: state.strokeColor || DEFAULT_STROKE_COLOR,
+                    strokeWidth: Number.isFinite(+state.strokeWidth) ? Math.max(0, +state.strokeWidth) : 0,
+                    fill: geometry.closed === false ? null : state.fill
+                };
+                shapes.push(entry);
+                return entry;
+            };
+
+            const parseGroup = (entries, incomingState, layerMeta) => {
+                if (!Array.isArray(entries)) return [];
+                const transformEntry = entries.find(entry => entry && entry.ty === 'tr');
+                const baseTransform = transformEntry
+                    ? multiplyMatrix(incomingState.transform, matrixFromTransform(transformEntry, frame))
+                    : incomingState.transform;
+                const state = {
+                    transform: baseTransform,
+                    strokeColor: incomingState.strokeColor,
+                    strokeWidth: incomingState.strokeWidth,
+                    fill: incomingState.fill
+                };
+                const shapesInGroup = [];
+                const applyStrokeState = () => {
+                    const strokeColor = state.strokeColor || DEFAULT_STROKE_COLOR;
+                    const strokeWidth = Number.isFinite(+state.strokeWidth) ? Math.max(0, +state.strokeWidth) : 0;
+                    shapesInGroup.forEach(shape => {
+                        shape.strokeColor = strokeColor;
+                        shape.strokeWidth = strokeWidth;
+                    });
+                };
+                const applyFillState = () => {
+                    const fillValue = state.fill;
+                    shapesInGroup.forEach(shape => {
+                        shape.fill = shape.closed === false ? null : fillValue;
+                    });
+                };
+                entries.forEach(entry => {
+                    if (!entry || entry.ty === 'tr') return;
+                    if (entry.ty === 'gr') {
+                        const nestedShapes = parseGroup(entry.it || [], cloneState(state), layerMeta);
+                        shapesInGroup.push(...nestedShapes);
+                        return;
+                    }
+                    if (entry.ty === 'st') {
+                        const opacity = opacityFrom(entry.o, frame);
+                        if (opacity <= 0) {
+                            state.strokeWidth = 0;
+                        } else {
+                            const strokeColor = colorFrom(entry.c, state.strokeColor || DEFAULT_STROKE_COLOR, frame);
+                            state.strokeColor = colorWithAlpha(strokeColor, opacity);
+                            const width = numberFrom(entry.w, state.strokeWidth, frame);
+                            if (Number.isFinite(width)) state.strokeWidth = Math.max(0, width);
+                        }
+                        applyStrokeState();
+                        return;
+                    }
+                    if (entry.ty === 'gs') {
+                        const opacity = opacityFrom(entry.o, frame);
+                        if (opacity <= 0) {
+                            state.strokeWidth = 0;
+                        } else {
+                            state.strokeColor = gradientToColor(entry, state.strokeColor || DEFAULT_STROKE_COLOR, opacity, frame);
+                            const width = numberFrom(entry.w, state.strokeWidth, frame);
+                            if (Number.isFinite(width)) state.strokeWidth = Math.max(0, width);
+                        }
+                        applyStrokeState();
+                        return;
+                    }
+                    if (entry.ty === 'fl') {
+                        const opacity = opacityFrom(entry.o, frame);
+                        if (opacity <= 0) state.fill = null;
+                        else {
+                            const fillColor = colorFrom(entry.c, state.fill || DEFAULT_STROKE_COLOR, frame);
+                            state.fill = colorWithAlpha(fillColor, opacity);
+                        }
+                        applyFillState();
+                        return;
+                    }
+                    if (entry.ty === 'gf') {
+                        const opacity = opacityFrom(entry.o, frame);
+                        state.fill = opacity <= 0 ? null : gradientToColor(entry, state.fill || DEFAULT_STROKE_COLOR, opacity, frame);
+                        applyFillState();
+                        return;
+                    }
+                    if (entry.ty === 'sh' || entry.ty === 'rc' || entry.ty === 'el' || entry.ty === 'sr') {
+                        const shape = pushShape(entry, state, layerMeta);
+                        if (shape) shapesInGroup.push(shape);
+                    }
+                });
+                return shapesInGroup;
+            };
+
+            layers.forEach((layer, idx) => {
+                if (!layer || layer.ty !== 4) return;
+                if (layer.hd || layer.tt) return;
+                const opacity = opacityFrom(layer.ks?.o, frame);
+                if (opacity <= 0) return;
+                const layerMatrix = layerWorldMatrix(layer);
+                const layerName = typeof layer.nm === 'string' ? layer.nm.trim() : '';
+                const layerId = Number.isFinite(+layer.ind) ? +layer.ind : idx;
+                const layerMeta = {
+                    key: `layer:${layerId}`,
+                    name: layerName
+                };
+                const baseState = {
+                    transform: layerMatrix,
+                    strokeColor: DEFAULT_STROKE_COLOR,
+                    strokeWidth: 0,
+                    fill: null
+                };
+                parseGroup(layer.shapes || [], baseState, layerMeta);
+            });
+
+            return shapes;
+        };
+
+        sampleFrames.forEach(frame => {
+            const shapes = sampleFrame(frame);
+            frameSamples.set(frame, shapes);
         });
 
         const hasBounds = Number.isFinite(bounds.minX) && Number.isFinite(bounds.minY)
             && Number.isFinite(bounds.maxX) && Number.isFinite(bounds.maxY);
+        if (hasBounds) {
+            const boundsWidth = bounds.maxX - bounds.minX;
+            const boundsHeight = bounds.maxY - bounds.minY;
+            if (boundsWidth > EPSILON && boundsHeight > EPSILON) {
+                const boundScale = Math.min(
+                    targetWidth / boundsWidth,
+                    targetHeight / boundsHeight
+                );
+                if (Number.isFinite(boundScale) && boundScale > 0) {
+                    uniformScale = Math.min(uniformScale, boundScale);
+                }
+            }
+        }
 
         let offsetX = (targetWidth - width * uniformScale) / 2;
         let offsetY = (targetHeight - height * uniformScale) / 2;
@@ -895,15 +1076,7 @@ function registerFileSystem(ctx) {
             y: pt.y * uniformScale + offsetY
         });
 
-        pendingGeometry.forEach(geo => {
-            const layerKey = typeof geo.layerName === 'string' ? geo.layerName.trim() : '';
-            const layerGroup = ensureLayerGroup(layerKey);
-            let elementLabel = geo.layerName;
-            if (layerKey) {
-                const count = (layerCounts.get(layerKey) || 0) + 1;
-                layerCounts.set(layerKey, count);
-                elementLabel = `${layerKey} #${count}`;
-            }
+        const geometryToElement = (geo, override = {}) => {
             const stagePoints = [];
             geo.points.forEach(pt => {
                 const stage = toStagePoint(pt);
@@ -920,22 +1093,23 @@ function registerFileSystem(ctx) {
                     stagePoints.push({ x: first.x, y: first.y });
                 }
             }
-            if (stagePoints.length < 2) return;
+            if (stagePoints.length < 2) return null;
             const path = stagePoints.map(pt => ({
                 x: norm(pt.x, targetWidth),
                 y: norm(pt.y, targetHeight)
             }));
             const scaledStroke = geo.strokeWidth * uniformScale;
             const element = {
-                id: rndId('lt'),
+                id: override.id || rndId('lt'),
                 type: 'shape',
                 kind: 'shape',
-                color: geo.strokeColor,
+                color: geo.strokeColor || DEFAULT_STROKE_COLOR,
                 width: Number.isFinite(scaledStroke) ? Math.max(0, scaledStroke) : 0,
                 path,
                 visible: true
             };
-            if (geo.fill && geo.closed !== false) element.fill = geo.fill;
+            if (override.name) element.name = override.name;
+            if (geo.fill !== undefined && geo.fill !== null && geo.closed !== false) element.fill = geo.fill;
             const segmentEntries = Array.isArray(geo.segments) ? geo.segments : [];
             if (segmentEntries.length) {
                 const mappedSegments = segmentEntries.map(seg => {
@@ -959,19 +1133,113 @@ function registerFileSystem(ctx) {
                 }).filter(Boolean);
                 if (mappedSegments.length) element.segments = mappedSegments;
             }
-            if (elementLabel) element.name = elementLabel;
+            return element;
+        };
+
+        const items = [];
+        const groupByLayer = new Map();
+        const shapeRegistry = new Map();
+        const layerNameCounts = new Map();
+
+        const ensureLayerGroup = (meta) => {
+            if (!meta || !meta.layerKey) return null;
+            if (!groupByLayer.has(meta.layerKey)) {
+                const label = meta.layerName && meta.layerName.length ? meta.layerName : `Layer ${groupByLayer.size + 1}`;
+                const group = {
+                    id: rndId('lg'),
+                    type: 'group',
+                    kind: 'group',
+                    name: label,
+                    color: DEFAULT_STROKE_COLOR,
+                    width: 0,
+                    rot: 0,
+                    visible: true,
+                    children: []
+                };
+                groupByLayer.set(meta.layerKey, group);
+                items.push(group);
+            }
+            return groupByLayer.get(meta.layerKey);
+        };
+
+        sampleFrames.forEach(frame => {
+            const shapes = frameSamples.get(frame) || [];
+            shapes.forEach(geo => {
+                if (!shapeRegistry.has(geo.key)) {
+                    shapeRegistry.set(geo.key, { id: rndId('lt') });
+                }
+            });
+        });
+
+        const baseFrame = sampleFrames[0];
+        const baseShapes = frameSamples.get(baseFrame) || [];
+        baseShapes.forEach(geo => {
+            const registry = shapeRegistry.get(geo.key) || { id: rndId('lt') };
+            shapeRegistry.set(geo.key, registry);
+            const countKey = geo.layerKey;
+            const count = (layerNameCounts.get(countKey) || 0) + 1;
+            layerNameCounts.set(countKey, count);
+            const label = geo.layerName ? `${geo.layerName} #${count}` : undefined;
+            if (!registry.name && label) registry.name = label;
+            const element = geometryToElement(geo, { id: registry.id, name: registry.name || label });
+            if (!element) return;
+            const group = ensureLayerGroup({ layerKey: geo.layerKey, layerName: geo.layerName });
             items.push(element);
-            if (layerGroup && !layerGroup.children.includes(element.id)) {
-                layerGroup.children.push(element.id);
+            if (group && !group.children.includes(element.id)) group.children.push(element.id);
+        });
+
+        const presentIds = new Set(items.filter(it => it && typeof it === 'object' && it.id).map(it => it.id));
+        shapeRegistry.forEach((registry, key) => {
+            if (presentIds.has(registry.id)) return;
+            for (const frame of sampleFrames) {
+                const shapes = frameSamples.get(frame) || [];
+                const geo = shapes.find(entry => entry.key === key);
+                if (!geo) continue;
+                const element = geometryToElement(geo, { id: registry.id, name: registry.name });
+                if (!element) break;
+                const group = ensureLayerGroup({ layerKey: geo.layerKey, layerName: geo.layerName });
+                items.push(element);
+                if (group && !group.children.includes(element.id)) group.children.push(element.id);
+                presentIds.add(element.id);
+                break;
             }
         });
+
+        const staticGroups = Array.from(groupByLayer.values()).map(group => cloneValue(group));
+
+        const keyframes = sampleFrames.map(frame => {
+            const shapes = frameSamples.get(frame) || [];
+            const shapeMap = new Map(shapes.map(geo => [geo.key, geo]));
+            const snapshot = staticGroups.map(group => cloneValue(group));
+            shapeRegistry.forEach((registry, key) => {
+                const geo = shapeMap.get(key);
+                if (!geo) return;
+                const element = geometryToElement(geo, { id: registry.id, name: registry.name });
+                if (element) snapshot.push(element);
+            });
+            const sec = (frame - inPoint) / frameRate;
+            return {
+                t: Number.isFinite(sec) ? +(+sec).toFixed(3) : 0,
+                snapshot
+            };
+        }).filter(entry => entry.snapshot.length);
+
+        const duration = Math.max(0, (Math.max(...sampleFrames) - inPoint) / frameRate);
+        const durationFallback = keyframes.length ? Math.max(...keyframes.map(k => k.t || 0)) : 0;
+        const animationName = typeof data.nm === 'string' && data.nm.trim().length ? data.nm.trim() : 'Lottie Animation';
+        const animations = keyframes.length ? [{
+            id: rndId('anim'),
+            name: animationName,
+            duration: +(Math.max(duration, durationFallback)).toFixed(3),
+            keyframes
+        }] : [];
 
         return {
             type: 'LinePack',
             version: 2,
             size: { w: targetWidth, h: targetHeight },
             elements: items,
-            animations: []
+            animations
         };
     };
 
