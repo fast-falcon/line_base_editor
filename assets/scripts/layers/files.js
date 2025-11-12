@@ -9,6 +9,228 @@ function registerFileSystem(ctx) {
 
     const PRECISION = 3;
     const EPSILON = 1e-3;
+    const ENCODE_MARK = '~';
+    const ULTRA_MARK = '=';
+    const POINT_SCALE = 255;
+
+    const quantizeUnit = (value) => {
+        if (!Number.isFinite(value)) return 0;
+        const clamped = Math.max(0, Math.min(1, value));
+        return Math.round(clamped * POINT_SCALE);
+    };
+
+    const dequantizeUnit = (value) => {
+        if (!Number.isFinite(value)) return 0;
+        return +((value / POINT_SCALE).toFixed(PRECISION));
+    };
+
+    const encodeBinary = (bytes) => {
+        if (!(bytes instanceof Uint8Array)) return '';
+        if (typeof btoa === 'function') {
+            let out = '';
+            for (let i = 0; i < bytes.length; i++) out += String.fromCharCode(bytes[i]);
+            return btoa(out);
+        }
+        if (typeof Buffer !== 'undefined') {
+            return Buffer.from(bytes).toString('base64');
+        }
+        let result = '';
+        for (let i = 0; i < bytes.length; i++) result += String.fromCharCode(bytes[i]);
+        if (typeof globalThis !== 'undefined' && typeof globalThis.btoa === 'function') {
+            return globalThis.btoa(result);
+        }
+        return '';
+    };
+
+    const decodeBinary = (text) => {
+        if (typeof text !== 'string' || !text.length) return new Uint8Array(0);
+        if (typeof atob === 'function') {
+            const bin = atob(text);
+            const arr = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+            return arr;
+        }
+        if (typeof Buffer !== 'undefined') {
+            const buf = Buffer.from(text, 'base64');
+            return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+        }
+        if (typeof globalThis !== 'undefined' && typeof globalThis.atob === 'function') {
+            const bin = globalThis.atob(text);
+            const arr = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+            return arr;
+        }
+        return new Uint8Array(0);
+    };
+
+    const textEncoder = (typeof TextEncoder !== 'undefined') ? new TextEncoder() : null;
+    const textDecoder = (typeof TextDecoder !== 'undefined') ? new TextDecoder() : null;
+
+    const stringToBytes = (text) => {
+        const value = (text === undefined || text === null) ? '' : `${text}`;
+        if (textEncoder) return textEncoder.encode(value);
+        if (typeof Buffer !== 'undefined') {
+            const buf = Buffer.from(value, 'utf8');
+            return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+        }
+        const encoded = encodeURIComponent(value);
+        const bytes = [];
+        for (let i = 0; i < encoded.length; i++) {
+            const ch = encoded[i];
+            if (ch === '%') {
+                bytes.push(parseInt(encoded.slice(i + 1, i + 3), 16));
+                i += 2;
+            } else {
+                bytes.push(ch.charCodeAt(0));
+            }
+        }
+        return new Uint8Array(bytes);
+    };
+
+    const bytesToString = (bytes) => {
+        if (!(bytes instanceof Uint8Array)) return '';
+        if (textDecoder) {
+            try {
+                return textDecoder.decode(bytes);
+            } catch (err) {
+                // ignore and fall back
+            }
+        }
+        if (typeof Buffer !== 'undefined') {
+            return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('utf8');
+        }
+        let out = '';
+        for (let i = 0; i < bytes.length; i++) out += String.fromCharCode(bytes[i]);
+        try {
+            let encoded = '';
+            for (let i = 0; i < out.length; i++) {
+                const code = out.charCodeAt(i).toString(16).padStart(2, '0');
+                encoded += `%${code}`;
+            }
+            return decodeURIComponent(encoded);
+        } catch (err) {
+            return out;
+        }
+    };
+
+    const simplifyQuantizedPoints = (points) => {
+        if (!Array.isArray(points) || points.length <= 2) {
+            return Array.isArray(points) ? points.slice() : [];
+        }
+        const keep = new Array(points.length).fill(false);
+        keep[0] = true;
+        keep[points.length - 1] = true;
+        const stack = [[0, points.length - 1]];
+        const epsilonSq = 9;
+        while (stack.length) {
+            const [start, end] = stack.pop();
+            if (end <= start + 1) continue;
+            const startPt = points[start];
+            const endPt = points[end];
+            const dx = endPt[0] - startPt[0];
+            const dy = endPt[1] - startPt[1];
+            const lenSq = dx * dx + dy * dy || 1;
+            let index = -1;
+            let maxDist = 0;
+            for (let i = start + 1; i < end; i++) {
+                const pt = points[i];
+                const t = ((pt[0] - startPt[0]) * dx + (pt[1] - startPt[1]) * dy) / lenSq;
+                const projX = startPt[0] + t * dx;
+                const projY = startPt[1] + t * dy;
+                const distX = pt[0] - projX;
+                const distY = pt[1] - projY;
+                const distSq = distX * distX + distY * distY;
+                if (distSq > maxDist) {
+                    maxDist = distSq;
+                    index = i;
+                }
+            }
+            if (maxDist > epsilonSq && index > start && index < end) {
+                keep[index] = true;
+                stack.push([start, index]);
+                stack.push([index, end]);
+            }
+        }
+        return points.filter((_, idx) => keep[idx]);
+    };
+
+    const encodePointSequence = (points) => {
+        if (!Array.isArray(points) || !points.length) return null;
+        const quantized = [];
+        points.forEach(pt => {
+            if (!pt) return;
+            const source = Array.isArray(pt) ? pt : [pt.x, pt.y];
+            const x = Number.isFinite(+source[0]) ? +source[0] : 0;
+            const y = Number.isFinite(+source[1]) ? +source[1] : 0;
+            quantized.push([quantizeUnit(x), quantizeUnit(y)]);
+        });
+        const simplified = simplifyQuantizedPoints(quantized);
+        if (!simplified.length) return null;
+        const raw = [];
+        simplified.forEach(([qx, qy]) => {
+            raw.push(qx, qy);
+        });
+        if (!raw.length) return null;
+        const bytes = Uint8Array.from(raw);
+        return ENCODE_MARK + encodeBinary(bytes);
+    };
+
+    const decodePointSequence = (payload) => {
+        if (typeof payload !== 'string' || !payload.startsWith(ENCODE_MARK)) return null;
+        const bytes = decodeBinary(payload.slice(1));
+        if (!bytes.length) return null;
+        const view = bytes;
+        const points = [];
+        for (let i = 0; i + 1 < view.length; i += 2) {
+            const x = dequantizeUnit(view[i]);
+            const y = dequantizeUnit(view[i + 1]);
+            points.push([x, y]);
+        }
+        return points;
+    };
+
+    const encodeSegmentSequence = (segments) => {
+        if (!Array.isArray(segments) || !segments.length) return null;
+        const raw = [];
+        segments.forEach(seg => {
+            if (!seg || !seg.p1 || !seg.p2) return;
+            const type = seg.kind === 'quadratic' ? 1 : 0;
+            raw.push(type);
+            const p1 = Array.isArray(seg.p1) ? seg.p1 : [seg.p1.x, seg.p1.y];
+            const p2 = Array.isArray(seg.p2) ? seg.p2 : [seg.p2.x, seg.p2.y];
+            raw.push(quantizeUnit(p1[0]), quantizeUnit(p1[1]));
+            raw.push(quantizeUnit(p2[0]), quantizeUnit(p2[1]));
+            if (type && seg.cp) {
+                const cp = Array.isArray(seg.cp) ? seg.cp : [seg.cp.x, seg.cp.y];
+                raw.push(quantizeUnit(cp[0]), quantizeUnit(cp[1]));
+            }
+        });
+        if (!raw.length) return null;
+        const bytes = new Uint8Array(raw.length);
+        bytes.set(raw);
+        return ENCODE_MARK + encodeBinary(bytes);
+    };
+
+    const decodeSegmentSequence = (payload) => {
+        if (typeof payload !== 'string' || !payload.startsWith(ENCODE_MARK)) return null;
+        const bytes = decodeBinary(payload.slice(1));
+        if (!bytes.length) return null;
+        const view = bytes;
+        const segments = [];
+        for (let i = 0; i < view.length;) {
+            const type = view[i++];
+            if (i + 3 >= view.length) break;
+            const p1 = [dequantizeUnit(view[i++]), dequantizeUnit(view[i++])];
+            const p2 = [dequantizeUnit(view[i++]), dequantizeUnit(view[i++])];
+            const segment = { kind: type ? 'quadratic' : 'line', p1, p2 };
+            if (type) {
+                if (i + 1 >= view.length) break;
+                segment.cp = [dequantizeUnit(view[i++]), dequantizeUnit(view[i++])];
+            }
+            segments.push(segment);
+        }
+        return segments;
+    };
 
     function cloneValue(value) {
         if (Array.isArray(value)) return value.map(cloneValue);
@@ -188,6 +410,65 @@ function registerFileSystem(ctx) {
         const dx = a.x - b.x;
         const dy = a.y - b.y;
         return Math.hypot(dx, dy);
+    };
+
+    const pointSegmentDistanceSq = (pt, a, b) => {
+        if (!pt || !a || !b) return Infinity;
+        const vx = b.x - a.x;
+        const vy = b.y - a.y;
+        const wx = pt.x - a.x;
+        const wy = pt.y - a.y;
+        const lenSq = vx * vx + vy * vy;
+        if (lenSq === 0) {
+            const dx = pt.x - a.x;
+            const dy = pt.y - a.y;
+            return dx * dx + dy * dy;
+        }
+        let t = (wx * vx + wy * vy) / lenSq;
+        t = Math.max(0, Math.min(1, t));
+        const projX = a.x + t * vx;
+        const projY = a.y + t * vy;
+        const dx = pt.x - projX;
+        const dy = pt.y - projY;
+        return dx * dx + dy * dy;
+    };
+
+    const simplifyPath = (points, tolerance) => {
+        if (!Array.isArray(points) || points.length <= 2) {
+            return Array.isArray(points) ? points.slice() : [];
+        }
+        const sqTolerance = (Number.isFinite(tolerance) && tolerance > 0)
+            ? tolerance * tolerance
+            : 0;
+        if (sqTolerance <= EPSILON) {
+            return points.map(pt => ({ x: pt.x, y: pt.y }));
+        }
+        const lastIndex = points.length - 1;
+        const markers = new Uint8Array(points.length);
+        const stack = [[0, lastIndex]];
+        markers[0] = markers[lastIndex] = 1;
+        while (stack.length) {
+            const [start, end] = stack.pop();
+            let maxDist = 0;
+            let index = 0;
+            for (let i = start + 1; i < end; i++) {
+                const dist = pointSegmentDistanceSq(points[i], points[start], points[end]);
+                if (dist > maxDist) {
+                    maxDist = dist;
+                    index = i;
+                }
+            }
+            if (maxDist > sqTolerance && index) {
+                markers[index] = 1;
+                stack.push([start, index], [index, end]);
+            }
+        }
+        const simplified = [];
+        for (let i = 0; i <= lastIndex; i++) {
+            if (markers[i]) simplified.push({ x: points[i].x, y: points[i].y });
+        }
+        if (simplified.length < 2) return points.slice();
+        return simplified;
     };
 
     const approximateCubicSegment = (p0, p1, p2, p3) => {
@@ -901,8 +1182,19 @@ function registerFileSystem(ctx) {
             clampedFrames.add(inPoint);
             clampedFrames.add(outPoint);
         }
-        const sampleFrames = Array.from(clampedFrames).sort((a, b) => a - b);
+        let sampleFrames = Array.from(clampedFrames).sort((a, b) => a - b);
         if (sampleFrames.length === 1 && sampleFrames[0] !== outPoint) sampleFrames.push(outPoint);
+        const MAX_SAMPLES = 12;
+        if (sampleFrames.length > MAX_SAMPLES) {
+            const reduced = [];
+            const span = sampleFrames.length - 1;
+            for (let i = 0; i < MAX_SAMPLES; i++) {
+                const t = span === 0 ? 0 : (i / (MAX_SAMPLES - 1));
+                const index = Math.min(sampleFrames.length - 1, Math.round(t * span));
+                reduced.push(sampleFrames[index]);
+            }
+            sampleFrames = Array.from(new Set(reduced)).sort((a, b) => a - b);
+        }
 
         const frameSamples = new Map();
 
@@ -1110,7 +1402,20 @@ function registerFileSystem(ctx) {
                 }
             }
             if (stagePoints.length < 2) return null;
-            const path = stagePoints.map(pt => ({
+            let simplifiedPoints = stagePoints;
+            if (stagePoints.length > 3) {
+                const tolerance = Math.max(targetWidth, targetHeight) * 0.004;
+                const reduced = simplifyPath(stagePoints, tolerance);
+                if (Array.isArray(reduced) && reduced.length >= 2) simplifiedPoints = reduced;
+            }
+            if (geo.closed && simplifiedPoints.length > 1) {
+                const first = simplifiedPoints[0];
+                const last = simplifiedPoints[simplifiedPoints.length - 1];
+                if (distanceBetween(first, last) > EPSILON) {
+                    simplifiedPoints = simplifiedPoints.concat([{ x: first.x, y: first.y }]);
+                }
+            }
+            const path = simplifiedPoints.map(pt => ({
                 x: norm(pt.x, targetWidth),
                 y: norm(pt.y, targetHeight)
             }));
@@ -1126,29 +1431,6 @@ function registerFileSystem(ctx) {
             };
             if (override.name) element.name = override.name;
             if (geo.fill !== undefined && geo.fill !== null && geo.closed !== false) element.fill = geo.fill;
-            const segmentEntries = Array.isArray(geo.segments) ? geo.segments : [];
-            if (segmentEntries.length) {
-                const mappedSegments = segmentEntries.map(seg => {
-                    if (!seg || !seg.p1 || !seg.p2) return null;
-                    const stageP1 = toStagePoint(seg.p1);
-                    const stageP2 = toStagePoint(seg.p2);
-                    if (!stageP1 || !stageP2) return null;
-                    if (distanceBetween(stageP1, stageP2) <= EPSILON) return null;
-                    const result = {
-                        kind: seg.kind === 'quadratic' ? 'quadratic' : 'line',
-                        p1: { x: norm(stageP1.x, targetWidth), y: norm(stageP1.y, targetHeight) },
-                        p2: { x: norm(stageP2.x, targetWidth), y: norm(stageP2.y, targetHeight) }
-                    };
-                    if (seg.kind === 'quadratic' && seg.cp) {
-                        const stageCP = toStagePoint(seg.cp);
-                        if (stageCP) {
-                            result.cp = { x: norm(stageCP.x, targetWidth), y: norm(stageCP.y, targetHeight) };
-                        }
-                    }
-                    return result;
-                }).filter(Boolean);
-                if (mappedSegments.length) element.segments = mappedSegments;
-            }
             return element;
         };
 
@@ -1355,6 +1637,16 @@ function registerFileSystem(ctx) {
     };
 
     const expandPath = (pathSource) => {
+        if (typeof pathSource === 'string') {
+            const decoded = decodePointSequence(pathSource);
+            if (Array.isArray(decoded) && decoded.length) {
+                return decoded.map(pair => ({
+                    x: Number.isFinite(+pair[0]) ? +pair[0] : 0,
+                    y: Number.isFinite(+pair[1]) ? +pair[1] : 0
+                }));
+            }
+            return [];
+        }
         if (!Array.isArray(pathSource)) return [];
         if (!pathSource.length) return [];
         if (typeof pathSource[0] === 'number') {
@@ -1421,6 +1713,13 @@ function registerFileSystem(ctx) {
             let start = entry.start ?? entry.s;
             let end = entry.end ?? entry.e;
             let control = entry.control ?? entry.cp ?? entry.ctrl ?? entry.q;
+            if ((!start || !end) && typeof points === 'string') {
+                const decoded = decodePointSequence(points);
+                if (Array.isArray(decoded) && decoded.length >= 2) {
+                    [start, end] = decoded;
+                    if (decoded.length >= 3) control = decoded[2];
+                }
+            }
             if ((!start || !end) && points) {
                 if (Array.isArray(points)) {
                     if (points.length >= 4 && typeof points[0] === 'number') {
@@ -1453,7 +1752,13 @@ function registerFileSystem(ctx) {
         } else if (kind === 'shape') {
             const path = expandPath(points ?? entry.path);
             if (path.length) base.path = path;
-            if (Array.isArray(entry.segments)) base.segments = entry.segments;
+            const segSource = entry.segments;
+            if (typeof segSource === 'string') {
+                const decodedSegments = decodeSegmentSequence(segSource);
+                if (Array.isArray(decodedSegments) && decodedSegments.length) base.segments = decodedSegments.map(seg => cloneValue(seg));
+            } else if (Array.isArray(segSource)) {
+                base.segments = segSource.map(seg => cloneValue(seg));
+            }
             if (Array.isArray(entry.children)) base.children = entry.children.slice();
         } else if (kind === 'group') {
             if (Array.isArray(entry.children)) base.children = entry.children.slice();
@@ -1594,6 +1899,18 @@ function registerFileSystem(ctx) {
         if (!pack || typeof pack !== 'object') return pack;
         if (pack.type) return pack;
         if (!('t' in pack)) return pack;
+        const versionGuess = +(pack.v ?? pack.version ?? 0);
+        if ((versionGuess >= 4) || typeof pack.d === 'string') {
+            const payloadText = typeof pack.d === 'string'
+                ? pack.d
+                : (typeof pack.data === 'string' ? pack.data : (typeof pack.payload === 'string' ? pack.payload : null));
+            const unpacked = unpackUltraPayload(payloadText);
+            if (unpacked) return expandCompactPack(unpacked);
+        }
+        if (versionGuess >= 3 && (Array.isArray(pack.e) || typeof pack.e === 'string' || typeof pack.a === 'string')) {
+            const legacy = convertUltraToLegacy(pack);
+            if (legacy) return expandCompactPack(legacy);
+        }
         const typeMap = {
             LP: 'LinePack',
             LinePack: 'LinePack',
@@ -2011,32 +2328,1268 @@ function registerFileSystem(ctx) {
         });
     }
 
+    function buildCompactSnapshot(w, h) {
+        const width = Number.isFinite(+w) ? +(+w).toFixed(3) : 0;
+        const height = Number.isFinite(+h) ? +(+h).toFixed(3) : 0;
+        const elements = state.items
+            .map(it => serializeItemCompact(it, w, h))
+            .filter(Boolean);
+        const animations = state.animations.map(anim => {
+            const rawFrames = (anim.keyframes || []).map(k => ({
+                t: Number.isFinite(+k.t) ? +(+k.t).toFixed(3) : 0,
+                s: (k.snapshot || []).map(it => serializeItemCompact(it, w, h)).filter(Boolean)
+            }));
+            const keyframes = compressCompactKeyframes(rawFrames);
+            return {
+                i: anim.id,
+                n: anim.name,
+                d: Number.isFinite(+anim.duration) ? +(+anim.duration).toFixed(3) : 0,
+                k: keyframes
+            };
+        });
+        return {
+            t: 'LP',
+            v: 2,
+            s: [width, height],
+            e: elements,
+            a: animations
+        };
+    }
+
+    const TYPE_CODE = {
+        g: 0,
+        group: 0,
+        l: 1,
+        line: 1,
+        q: 2,
+        quadratic: 2,
+        s: 3,
+        shape: 3
+    };
+
+    const TYPE_FROM_CODE = ['g', 'l', 'q', 's'];
+
+    const FIELD_MASK = {
+        color: 1 << 0,
+        width: 1 << 1,
+        rotation: 1 << 2,
+        hidden: 1 << 3,
+        path: 1 << 4,
+        segments: 1 << 5,
+        fill: 1 << 6,
+        children: 1 << 7
+    };
+
+    const FIELD_DEFAULTS = {
+        color: 0,
+        width: 0,
+        rotation: 0,
+        hidden: 0,
+        path: 0,
+        segments: 0,
+        fill: 0,
+        children: 0
+    };
+
+    const FIELD_ORDER = ['color', 'width', 'rotation', 'hidden', 'path', 'segments', 'fill', 'children'];
+    const FIELD_ALWAYS = new Set(['path', 'segments', 'children']);
+    const WIDTH_BASE = 30;
+    const INDEX_MARK = '!';
+
+    const encodeIndexSequence = (list) => {
+        if (!Array.isArray(list) || !list.length) return null;
+        if (!list.every(value => Number.isInteger(value))) return null;
+        const bytes = [];
+        let prev = 0;
+        list.forEach((value, index) => {
+            let delta = index === 0 ? value : value - prev;
+            prev = value;
+            let zigzag = delta >= 0 ? (delta << 1) : ((-delta << 1) - 1);
+            while (zigzag >= 0x80) {
+                bytes.push((zigzag & 0x7f) | 0x80);
+                zigzag >>>= 7;
+            }
+            bytes.push(zigzag & 0x7f);
+        });
+        const buffer = new Uint8Array(bytes);
+        return INDEX_MARK + encodeBinary(buffer);
+    };
+
+    const decodeIndexSequence = (text) => {
+        if (typeof text !== 'string' || !text.startsWith(INDEX_MARK)) return null;
+        const payload = decodeBinary(text.slice(1));
+        if (!(payload instanceof Uint8Array) || !payload.length) return [];
+        const numbers = [];
+        let current = 0;
+        let shift = 0;
+        let prev = 0;
+        for (let i = 0; i < payload.length; i++) {
+            const byte = payload[i];
+            current |= (byte & 0x7f) << shift;
+            if (byte & 0x80) {
+                shift += 7;
+                continue;
+            }
+            const zigzag = current;
+            const delta = (zigzag >>> 1) ^ (-(zigzag & 1));
+            const value = numbers.length === 0 ? delta : prev + delta;
+            numbers.push(value);
+            prev = value;
+            current = 0;
+            shift = 0;
+        }
+        return numbers;
+    };
+
+    const SIGNED_FIELDS = new Set(['width', 'rotation']);
+
+    const encodeElementTable = (entries) => {
+        if (!Array.isArray(entries) || !entries.length) return null;
+        const bytes = [];
+        entries.forEach(entry => {
+            const arr = Array.isArray(entry) ? entry : [];
+            const type = Number.isFinite(+arr[0]) ? +arr[0] : 0;
+            const mask = Number.isFinite(+arr[1]) ? +arr[1] : 0;
+            bytes.push(type & 0xff);
+            bytes.push(mask & 0xff);
+            let cursor = 2;
+            FIELD_ORDER.forEach(key => {
+                const bit = FIELD_MASK[key];
+                if (!(mask & bit)) return;
+                const raw = Number.isFinite(+arr[cursor]) ? +arr[cursor] : 0;
+                cursor += 1;
+                let value = raw;
+                if (SIGNED_FIELDS.has(key)) {
+                    value = raw >= 0 ? (raw << 1) : ((-raw << 1) - 1);
+                }
+                let remaining = value >>> 0;
+                while (remaining >= 0x80) {
+                    bytes.push((remaining & 0x7f) | 0x80);
+                    remaining >>>= 7;
+                }
+                bytes.push(remaining & 0x7f);
+            });
+        });
+        return '@' + encodeBinary(new Uint8Array(bytes));
+    };
+
+    const decodeElementTable = (payload) => {
+        if (typeof payload !== 'string' || !payload.startsWith('@')) return null;
+        const data = decodeBinary(payload.slice(1));
+        if (!(data instanceof Uint8Array) || !data.length) return [];
+        const entries = [];
+        let offset = 0;
+        while (offset < data.length) {
+            const type = data[offset++] ?? 0;
+            const mask = data[offset++] ?? 0;
+            const values = [type, mask];
+            FIELD_ORDER.forEach(key => {
+                if (!(mask & FIELD_MASK[key])) return;
+                let result = 0;
+                let shift = 0;
+                while (offset < data.length) {
+                    const byte = data[offset++];
+                    result |= (byte & 0x7f) << shift;
+                    if (!(byte & 0x80)) break;
+                    shift += 7;
+                }
+                if (SIGNED_FIELDS.has(key)) {
+                    const signed = (result >>> 1) ^ (-(result & 1));
+                    values.push(signed);
+                } else {
+                    values.push(result >>> 0);
+                }
+            });
+            entries.push(values);
+        }
+        return entries;
+    };
+
+    const pushVarint = (buffer, value) => {
+        let v = value >>> 0;
+        while (v >= 0x80) {
+            buffer.push((v & 0x7f) | 0x80);
+            v >>>= 7;
+        }
+        buffer.push(v & 0x7f);
+    };
+
+    const pushSignedVarint = (buffer, value) => {
+        const zigzag = value >= 0 ? (value << 1) : ((-value << 1) - 1);
+        pushVarint(buffer, zigzag >>> 0);
+    };
+
+    const readVarint = (data, state) => {
+        let result = 0;
+        let shift = 0;
+        while (state.pos < data.length) {
+            const byte = data[state.pos++];
+            result |= (byte & 0x7f) << shift;
+            if (!(byte & 0x80)) break;
+            shift += 7;
+        }
+        return result >>> 0;
+    };
+
+    const readSignedVarint = (data, state) => {
+        const value = readVarint(data, state);
+        return (value >>> 1) ^ (-(value & 1));
+    };
+
+    const buildStringTable = (list) => {
+        if (!Array.isArray(list) || !list.length) return null;
+        const buffer = [];
+        pushVarint(buffer, list.length);
+        list.forEach(entry => {
+            const bytes = stringToBytes(entry);
+            pushVarint(buffer, bytes.length);
+            for (let i = 0; i < bytes.length; i++) buffer.push(bytes[i]);
+        });
+        return new Uint8Array(buffer);
+    };
+
+    const parseStringTable = (payload) => {
+        if (!(payload instanceof Uint8Array) || !payload.length) return [];
+        const state = { pos: 0 };
+        const count = readVarint(payload, state);
+        const items = [];
+        for (let i = 0; i < count; i++) {
+            const length = readVarint(payload, state);
+            const end = Math.min(state.pos + length, payload.length);
+            const slice = payload.slice(state.pos, end);
+            state.pos = end;
+            items.push(bytesToString(slice));
+        }
+        return items;
+    };
+
+    const buildChildTable = (list) => {
+        if (!Array.isArray(list) || !list.length) return null;
+        const buffer = [];
+        pushVarint(buffer, list.length);
+        list.forEach(entry => {
+            const arr = Array.isArray(entry)
+                ? entry.map(value => (Number.isInteger(value) && value >= 0) ? value : -1).filter(value => value >= 0)
+                : [];
+            pushVarint(buffer, arr.length);
+            arr.forEach(value => pushVarint(buffer, value >>> 0));
+        });
+        return new Uint8Array(buffer);
+    };
+
+    const parseChildTable = (payload) => {
+        if (!(payload instanceof Uint8Array) || !payload.length) return [];
+        const state = { pos: 0 };
+        const count = readVarint(payload, state);
+        const items = [];
+        for (let i = 0; i < count; i++) {
+            const length = readVarint(payload, state);
+            const entry = [];
+            for (let j = 0; j < length; j++) {
+                entry.push(readVarint(payload, state));
+            }
+            items.push(entry);
+        }
+        return items;
+    };
+
+    const buildBlobTable = (list, options = {}) => {
+        if (!Array.isArray(list) || !list.length) return null;
+        const buffer = [];
+        pushVarint(buffer, list.length);
+        const compressPaths = !!options.compressPaths;
+        list.forEach(entry => {
+            const value = (entry === undefined || entry === null) ? '' : `${entry}`;
+            let flag = 0;
+            let bytes = null;
+            if (typeof value === 'string' && value.startsWith(ENCODE_MARK)) {
+                const decoded = decodeBinary(value.slice(1));
+                if (decoded instanceof Uint8Array && decoded.length) {
+                    if (compressPaths) {
+                        const packed = compressPathEntry(decoded);
+                        if (packed) {
+                            flag = 2;
+                            bytes = packed;
+                        } else {
+                            flag = 1;
+                            bytes = decoded;
+                        }
+                    } else {
+                        flag = 1;
+                        bytes = decoded;
+                    }
+                }
+            }
+            if (!bytes) {
+                bytes = stringToBytes(value);
+            }
+            buffer.push(flag & 0xff);
+            pushVarint(buffer, bytes.length);
+            for (let i = 0; i < bytes.length; i++) buffer.push(bytes[i]);
+        });
+        return new Uint8Array(buffer);
+    };
+
+    const parseBlobTable = (payload) => {
+        if (!(payload instanceof Uint8Array) || !payload.length) return [];
+        const state = { pos: 0 };
+        const count = readVarint(payload, state);
+        const items = [];
+        for (let i = 0; i < count; i++) {
+            const flag = payload[state.pos++] ?? 0;
+            const length = readVarint(payload, state);
+            const end = Math.min(state.pos + length, payload.length);
+            const slice = payload.slice(state.pos, end);
+            state.pos = end;
+            if (flag === 1) {
+                items.push(ENCODE_MARK + encodeBinary(slice));
+            } else if (flag === 2) {
+                const restored = decompressPathEntry(slice);
+                if (restored && restored.length) {
+                    items.push(ENCODE_MARK + encodeBinary(restored));
+                } else {
+                    items.push(ENCODE_MARK + encodeBinary(slice));
+                }
+            } else {
+                items.push(bytesToString(slice));
+            }
+        }
+        return items;
+    };
+
+    const compressPathEntry = (bytes) => {
+        if (!(bytes instanceof Uint8Array) || bytes.length < 4 || (bytes.length & 1)) return null;
+        const pointCount = bytes.length >>> 1;
+        const buffer = [];
+        pushVarint(buffer, pointCount);
+        buffer.push(bytes[0]);
+        buffer.push(bytes[1]);
+        let prevX = bytes[0];
+        let prevY = bytes[1];
+        for (let i = 2; i < bytes.length; i += 2) {
+            const x = bytes[i];
+            const y = bytes[i + 1];
+            const dx = x - prevX;
+            const dy = y - prevY;
+            const nibbleX = (dx >= -7 && dx <= 7) ? (dx + 7) : 15;
+            const nibbleY = (dy >= -7 && dy <= 7) ? (dy + 7) : 15;
+            buffer.push(((nibbleX & 0xf) << 4) | (nibbleY & 0xf));
+            if (nibbleX === 15) buffer.push((dx + 256) & 0xff);
+            if (nibbleY === 15) buffer.push((dy + 256) & 0xff);
+            prevX = x;
+            prevY = y;
+        }
+        return new Uint8Array(buffer);
+    };
+
+    const decompressPathEntry = (bytes) => {
+        if (!(bytes instanceof Uint8Array) || !bytes.length) return null;
+        const state = { pos: 0 };
+        const pointCount = readVarint(bytes, state);
+        if (!Number.isFinite(pointCount) || pointCount <= 0) return null;
+        if (state.pos + 1 >= bytes.length) return null;
+        const out = new Uint8Array(pointCount * 2);
+        let prevX = bytes[state.pos++] ?? 0;
+        let prevY = bytes[state.pos++] ?? 0;
+        out[0] = prevX;
+        out[1] = prevY;
+        let outPos = 2;
+        while (outPos < out.length && state.pos < bytes.length) {
+            const packed = bytes[state.pos++] ?? 0;
+            const nibbleX = packed >>> 4;
+            const nibbleY = packed & 0xf;
+            let dx = nibbleX === 15 ? ((bytes[state.pos++] ?? 0) << 24 >> 24) : (nibbleX - 7);
+            let dy = nibbleY === 15 ? ((bytes[state.pos++] ?? 0) << 24 >> 24) : (nibbleY - 7);
+            let x = prevX + dx;
+            let y = prevY + dy;
+            if (x < 0) x = 0;
+            else if (x > 255) x = 255;
+            if (y < 0) y = 0;
+            else if (y > 255) y = 255;
+            out[outPos++] = x & 0xff;
+            out[outPos++] = y & 0xff;
+            prevX = x & 0xff;
+            prevY = y & 0xff;
+        }
+        if (outPos !== out.length) return null;
+        return out;
+    };
+
+    const writeSection = (target, section) => {
+        if (section instanceof Uint8Array && section.length) {
+            pushVarint(target, section.length);
+            for (let i = 0; i < section.length; i++) target.push(section[i]);
+        } else {
+            pushVarint(target, 0);
+        }
+    };
+
+    const readSection = (data, state) => {
+        const length = readVarint(data, state);
+        if (!length) return new Uint8Array(0);
+        const end = Math.min(state.pos + length, data.length);
+        const slice = data.slice(state.pos, end);
+        state.pos = end;
+        return slice;
+    };
+
+    const compressUltraBinary = (bytes) => {
+        if (!(bytes instanceof Uint8Array) || bytes.length < 32) return null;
+        const out = [];
+        pushVarint(out, bytes.length);
+        let pos = 0;
+        while (pos < bytes.length) {
+            const controlIndex = out.length;
+            out.push(0);
+            let control = 0;
+            let mask = 1;
+            for (let token = 0; token < 8 && pos < bytes.length; token++, mask <<= 1) {
+                const windowStart = Math.max(0, pos - 4095);
+                let bestLength = 0;
+                let bestOffset = 0;
+                const maxLength = Math.min(18, bytes.length - pos);
+                if (maxLength >= 3) {
+                    for (let candidate = pos - 1; candidate >= windowStart; candidate--) {
+                        let length = 0;
+                        while (length < maxLength && bytes[candidate + length] === bytes[pos + length]) {
+                            length += 1;
+                        }
+                        if (length > bestLength && length >= 3) {
+                            bestLength = length;
+                            bestOffset = pos - candidate;
+                            if (length === maxLength) break;
+                        }
+                    }
+                }
+                if (bestLength >= 3 && bestOffset > 0) {
+                    control |= mask;
+                    const encodedLength = (bestLength - 3) & 0x0f;
+                    out.push(((encodedLength & 0x0f) << 4) | ((bestOffset >>> 8) & 0x0f));
+                    out.push(bestOffset & 0xff);
+                    pos += bestLength;
+                } else {
+                    out.push(bytes[pos]);
+                    pos += 1;
+                }
+            }
+            out[controlIndex] = control;
+        }
+        return new Uint8Array(out);
+    };
+
+    const decompressUltraBinary = (bytes) => {
+        if (!(bytes instanceof Uint8Array) || !bytes.length) return new Uint8Array(0);
+        const state = { pos: 0 };
+        const expected = readVarint(bytes, state);
+        if (!Number.isFinite(expected) || expected < 0) return new Uint8Array(0);
+        const output = new Uint8Array(expected);
+        let outPos = 0;
+        while (state.pos < bytes.length && outPos < expected) {
+            const control = bytes[state.pos++] ?? 0;
+            for (let mask = 1; mask <= 0x80 && outPos < expected; mask <<= 1) {
+                if (state.pos >= bytes.length) break;
+                if (control & mask) {
+                    if (state.pos + 1 >= bytes.length) return new Uint8Array(0);
+                    const header = bytes[state.pos++] ?? 0;
+                    const tail = bytes[state.pos++] ?? 0;
+                    const offset = ((header & 0x0f) << 8) | tail;
+                    const length = ((header >>> 4) & 0x0f) + 3;
+                    if (offset <= 0 || offset > outPos) return new Uint8Array(0);
+                    for (let i = 0; i < length && outPos < expected; i++) {
+                        output[outPos] = output[outPos - offset];
+                        outPos += 1;
+                    }
+                } else {
+                    output[outPos++] = bytes[state.pos++] ?? 0;
+                }
+            }
+        }
+        if (outPos !== expected) return new Uint8Array(0);
+        return output;
+    };
+
+    const packUltraPayload = (raw) => {
+        if (!raw || typeof raw !== 'object') return null;
+        const bytes = [];
+        const sizeArray = Array.isArray(raw.s) ? raw.s : [0, 0];
+        const widthScaled = Math.round((Number.isFinite(+sizeArray[0]) ? +sizeArray[0] : 0) * 1000);
+        const heightScaled = Math.round((Number.isFinite(+sizeArray[1]) ? +sizeArray[1] : 0) * 1000);
+        pushVarint(bytes, widthScaled >>> 0);
+        pushVarint(bytes, heightScaled >>> 0);
+        const baseCount = Number.isFinite(+raw.b) ? Math.max(0, Math.floor(+raw.b)) : 0;
+        pushVarint(bytes, baseCount >>> 0);
+
+        const encodeElementBinary = (payload) => {
+            if (payload instanceof Uint8Array) return payload;
+            if (typeof payload === 'string') {
+                if (payload.startsWith('@')) {
+                    const decoded = decodeBinary(payload.slice(1));
+                    if (decoded instanceof Uint8Array && decoded.length) return decoded;
+                    return new Uint8Array(0);
+                }
+                return stringToBytes(payload);
+            }
+            if (Array.isArray(payload) && payload.length) {
+                const encoded = encodeElementTable(payload);
+                if (typeof encoded === 'string' && encoded.startsWith('@')) {
+                    return decodeBinary(encoded.slice(1));
+                }
+                return stringToBytes(JSON.stringify(payload));
+            }
+            return new Uint8Array(0);
+        };
+
+        const encodeAnimationBinary = (payload) => {
+            if (payload instanceof Uint8Array) return payload;
+            if (typeof payload === 'string') {
+                if (payload.startsWith('%')) {
+                    const decoded = decodeBinary(payload.slice(1));
+                    if (decoded instanceof Uint8Array && decoded.length) return decoded;
+                    return new Uint8Array(0);
+                }
+                return stringToBytes(payload);
+            }
+            if (Array.isArray(payload) && payload.length) {
+                const encoded = encodeAnimationsTable(payload);
+                if (typeof encoded === 'string' && encoded.startsWith('%')) {
+                    return decodeBinary(encoded.slice(1));
+                }
+                return stringToBytes(JSON.stringify(payload));
+            }
+            return new Uint8Array(0);
+        };
+
+        writeSection(bytes, encodeElementBinary(raw.e));
+        writeSection(bytes, encodeAnimationBinary(raw.a));
+        writeSection(bytes, buildStringTable(raw.c));
+        writeSection(bytes, buildStringTable(raw.f));
+        writeSection(bytes, buildBlobTable(raw.p, { compressPaths: true }));
+        writeSection(bytes, buildBlobTable(raw.g));
+        writeSection(bytes, buildChildTable(raw.h));
+        writeSection(bytes, buildStringTable(raw.n));
+
+        if (!bytes.length) return null;
+        const rawBytes = new Uint8Array(bytes);
+        const compressed = compressUltraBinary(rawBytes);
+        if (compressed && compressed.length + 1 < rawBytes.length) {
+            return '>' + encodeBinary(compressed);
+        }
+        return ULTRA_MARK + encodeBinary(rawBytes);
+    };
+
+    const unpackUltraPayload = (payload) => {
+        if (typeof payload !== 'string') return null;
+        let marker = payload[0];
+        if (marker !== ULTRA_MARK && marker !== '>') return null;
+        const data = decodeBinary(payload.slice(1));
+        if (!(data instanceof Uint8Array) || !data.length) return null;
+        const source = marker === '>' ? decompressUltraBinary(data) : data;
+        if (!(source instanceof Uint8Array) || !source.length) return null;
+        const state = { pos: 0 };
+        const widthScaled = readVarint(source, state);
+        const heightScaled = readVarint(source, state);
+        const baseCount = readVarint(source, state);
+        const elementBytes = readSection(source, state);
+        const animationBytes = readSection(source, state);
+        const colorsBytes = readSection(source, state);
+        const fillsBytes = readSection(source, state);
+        const pathsBytes = readSection(source, state);
+        const segmentsBytes = readSection(source, state);
+        const childrenBytes = readSection(source, state);
+        const namesBytes = readSection(source, state);
+
+        const sizeArray = [+(widthScaled / 1000).toFixed(3), +(heightScaled / 1000).toFixed(3)];
+        const result = {
+            t: 'LP',
+            v: 3,
+            s: sizeArray,
+            b: baseCount >>> 0,
+            e: elementBytes.length ? ('@' + encodeBinary(elementBytes)) : [],
+            a: animationBytes.length ? ('%' + encodeBinary(animationBytes)) : []
+        };
+        const colors = parseStringTable(colorsBytes);
+        if (colors.length) result.c = colors;
+        const fills = parseStringTable(fillsBytes);
+        if (fills.length) result.f = fills;
+        const paths = parseBlobTable(pathsBytes);
+        if (paths.length) result.p = paths;
+        const segments = parseBlobTable(segmentsBytes);
+        if (segments.length) result.g = segments;
+        const children = parseChildTable(childrenBytes);
+        if (children.length) result.h = children;
+        const names = parseStringTable(namesBytes);
+        if (names.length) result.n = names;
+        return result;
+    };
+
+
+    const encodeAnimationsTable = (animations) => {
+        if (!Array.isArray(animations) || !animations.length) return null;
+        const bytes = [];
+        pushVarint(bytes, animations.length);
+        animations.forEach(anim => {
+            const nameIdx = Number.isFinite(+anim[0]) ? +anim[0] : 0;
+            const duration = Number.isFinite(+anim[1]) ? +anim[1] : 0;
+            const keyframes = Array.isArray(anim[2]) ? anim[2] : [];
+            pushVarint(bytes, nameIdx >>> 0);
+            pushVarint(bytes, duration >>> 0);
+            pushVarint(bytes, keyframes.length);
+            keyframes.forEach(frame => {
+                const frameArr = Array.isArray(frame) ? frame : [];
+                const time = Number.isFinite(+frameArr[0]) ? +frameArr[0] : 0;
+                pushVarint(bytes, time >>> 0);
+                let snapshotEntries = frameArr[1];
+                if (typeof snapshotEntries === 'string' && snapshotEntries.startsWith(INDEX_MARK)) {
+                    snapshotEntries = decodeIndexSequence(snapshotEntries) || [];
+                }
+                if (!Array.isArray(snapshotEntries)) snapshotEntries = [];
+                pushVarint(bytes, snapshotEntries.length);
+                snapshotEntries.forEach(entry => {
+                    if (Array.isArray(entry)) {
+                        const idx = Number.isFinite(+entry[0]) ? +entry[0] : 0;
+                        pushVarint(bytes, (idx << 1) | 1);
+                        const mask = Number.isFinite(+entry[1]) ? +entry[1] : 0;
+                        bytes.push(mask & 0xff);
+                        let cursor = 2;
+                        FIELD_ORDER.forEach(key => {
+                            if (!(mask & FIELD_MASK[key])) return;
+                            const raw = Number.isFinite(+entry[cursor]) ? +entry[cursor] : 0;
+                            cursor += 1;
+                            if (SIGNED_FIELDS.has(key)) pushSignedVarint(bytes, raw);
+                            else pushVarint(bytes, raw >>> 0);
+                        });
+                    } else {
+                        const idx = Number.isFinite(+entry) ? +entry : 0;
+                        pushVarint(bytes, idx << 1);
+                    }
+                });
+                const updatesEntries = Array.isArray(frameArr[2]) ? frameArr[2] : [];
+                pushVarint(bytes, updatesEntries.length);
+                updatesEntries.forEach(entry => {
+                    const idx = Number.isFinite(+entry[0]) ? +entry[0] : 0;
+                    const mask = Number.isFinite(+entry[1]) ? +entry[1] : 0;
+                    pushVarint(bytes, idx >>> 0);
+                    bytes.push(mask & 0xff);
+                    let cursor = 2;
+                    FIELD_ORDER.forEach(key => {
+                        if (!(mask & FIELD_MASK[key])) return;
+                        const raw = Number.isFinite(+entry[cursor]) ? +entry[cursor] : 0;
+                        cursor += 1;
+                        if (SIGNED_FIELDS.has(key)) pushSignedVarint(bytes, raw);
+                        else pushVarint(bytes, raw >>> 0);
+                    });
+                });
+                let removedEntries = frameArr[3];
+                if (typeof removedEntries === 'string' && removedEntries.startsWith(INDEX_MARK)) {
+                    removedEntries = decodeIndexSequence(removedEntries) || [];
+                }
+                if (!Array.isArray(removedEntries)) removedEntries = [];
+                pushVarint(bytes, removedEntries.length);
+                let prevRemoved = 0;
+                removedEntries.forEach((value, index) => {
+                    const delta = index === 0 ? value : value - prevRemoved;
+                    prevRemoved = value;
+                    pushSignedVarint(bytes, delta);
+                });
+            });
+        });
+        return '%' + encodeBinary(new Uint8Array(bytes));
+    };
+
+    const decodeAnimationsTable = (payload) => {
+        if (typeof payload !== 'string' || !payload.startsWith('%')) return null;
+        const data = decodeBinary(payload.slice(1));
+        if (!(data instanceof Uint8Array) || !data.length) return [];
+        const state = { pos: 0 };
+        const count = readVarint(data, state);
+        const animations = [];
+        for (let a = 0; a < count; a++) {
+            const nameIdx = readVarint(data, state);
+            const duration = readVarint(data, state);
+            const frameCount = readVarint(data, state);
+            const keyframes = [];
+            for (let f = 0; f < frameCount; f++) {
+                const time = readVarint(data, state);
+                const snapshotCount = readVarint(data, state);
+                const snapshot = [];
+                for (let i = 0; i < snapshotCount; i++) {
+                    const tag = readVarint(data, state);
+                    if (tag & 1) {
+                        const idx = tag >>> 1;
+                        const mask = data[state.pos++] ?? 0;
+                        const entry = [idx, mask];
+                        FIELD_ORDER.forEach(key => {
+                            if (!(mask & FIELD_MASK[key])) return;
+                            if (SIGNED_FIELDS.has(key)) entry.push(readSignedVarint(data, state));
+                            else entry.push(readVarint(data, state));
+                        });
+                        snapshot.push(entry);
+                    } else {
+                        const idx = tag >>> 1;
+                        snapshot.push(idx);
+                    }
+                }
+                const updatesCount = readVarint(data, state);
+                const updates = [];
+                for (let i = 0; i < updatesCount; i++) {
+                    const idx = readVarint(data, state);
+                    const mask = data[state.pos++] ?? 0;
+                    const entry = [idx, mask];
+                    FIELD_ORDER.forEach(key => {
+                        if (!(mask & FIELD_MASK[key])) return;
+                        if (SIGNED_FIELDS.has(key)) entry.push(readSignedVarint(data, state));
+                        else entry.push(readVarint(data, state));
+                    });
+                    updates.push(entry);
+                }
+                const removedCount = readVarint(data, state);
+                const removed = [];
+                let prevRemoved = 0;
+                for (let i = 0; i < removedCount; i++) {
+                    const delta = readSignedVarint(data, state);
+                    const value = i === 0 ? delta : prevRemoved + delta;
+                    prevRemoved = value;
+                    removed.push(value);
+                }
+                const frameEntry = [time, snapshot];
+                if (updates.length || removed.length) {
+                    frameEntry.push(updates);
+                    if (removed.length) frameEntry.push(removed);
+                }
+                keyframes.push(frameEntry);
+            }
+            animations.push([nameIdx, duration, keyframes]);
+        }
+        return animations;
+    };
+
+    function shrinkCompactSnapshot(compact) {
+        if (!compact || typeof compact !== 'object') {
+            return compact;
+        }
+
+        const sizeArray = Array.isArray(compact.s) ? compact.s : [0, 0];
+
+        const colorPalette = [];
+        const colorIndex = new Map();
+        const fillPalette = [];
+        const fillIndex = new Map();
+        const pathPalette = [];
+        const pathIndex = new Map();
+        const segmentPalette = [];
+        const segmentIndex = new Map();
+        const childPalette = [];
+        const childIndex = new Map();
+        const namePalette = [];
+        const nameIndex = new Map();
+
+        const idIndex = new Map();
+        const elements = [];
+        const baseStates = new Map();
+
+        const ensureArrayIndex = (list, targetIndex) => {
+            while (list.length <= targetIndex) list.push(null);
+        };
+
+        const cloneStateValues = (values) => ({
+            type: values.type,
+            color: values.color,
+            width: values.width,
+            rotation: values.rotation,
+            hidden: values.hidden,
+            path: values.path,
+            segments: values.segments,
+            fill: values.fill,
+            children: values.children
+        });
+
+        const statesEqual = (a, b) => {
+            if (!a || !b) return false;
+            if ((a.type ?? 0) !== (b.type ?? 0)) return false;
+            for (const key of FIELD_ORDER) {
+                if ((a[key] ?? 0) !== (b[key] ?? 0)) return false;
+            }
+            return true;
+        };
+
+        const ensureItemIndex = (entry) => {
+            const id = typeof entry === 'string' ? entry : entry?.i ?? entry?.id ?? null;
+            if (!id) return -1;
+            if (idIndex.has(id)) return idIndex.get(id);
+            const idx = idIndex.size;
+            idIndex.set(id, idx);
+            ensureArrayIndex(elements, idx);
+            return idx;
+        };
+
+        const registerColor = (color) => {
+            if (!color || typeof color !== 'string' || color === '#ffffff') return 0;
+            const normalized = color.trim();
+            if (colorIndex.has(normalized)) return colorIndex.get(normalized);
+            const idx = colorPalette.length + 1;
+            colorPalette.push(normalized);
+            colorIndex.set(normalized, idx);
+            return idx;
+        };
+
+        const registerFill = (fill) => {
+            if (fill === undefined || fill === null || fill === '') return 0;
+            const key = `${fill}`;
+            if (fillIndex.has(key)) return fillIndex.get(key);
+            const idx = fillPalette.length + 1;
+            fillPalette.push(key);
+            fillIndex.set(key, idx);
+            return idx;
+        };
+
+        const registerPath = (path) => {
+            if (!path) return 0;
+            let encoded = null;
+            if (typeof path === 'string') {
+                encoded = path;
+            } else if (Array.isArray(path)) {
+                encoded = encodePointSequence(path) || JSON.stringify(path);
+            } else if (typeof path === 'object') {
+                encoded = encodePointSequence(path.points || path) || JSON.stringify(path);
+            }
+            if (!encoded) return 0;
+            if (pathIndex.has(encoded)) return pathIndex.get(encoded);
+            const idx = pathPalette.length + 1;
+            pathPalette.push(encoded);
+            pathIndex.set(encoded, idx);
+            return idx;
+        };
+
+        const registerSegments = (segments) => {
+            if (!segments) return 0;
+            let encoded = null;
+            if (typeof segments === 'string') {
+                encoded = segments;
+            } else if (Array.isArray(segments)) {
+                encoded = encodeSegmentSequence(segments) || JSON.stringify(segments);
+            }
+            if (!encoded) return 0;
+            if (segmentIndex.has(encoded)) return segmentIndex.get(encoded);
+            const idx = segmentPalette.length + 1;
+            segmentPalette.push(encoded);
+            segmentIndex.set(encoded, idx);
+            return idx;
+        };
+
+        const registerChildren = (children) => {
+            if (!Array.isArray(children) || !children.length) return 0;
+            const indexes = children.map(child => ensureItemIndex(child)).filter(idx => idx >= 0);
+            if (!indexes.length) return 0;
+            const key = indexes.join(',');
+            if (childIndex.has(key)) return childIndex.get(key);
+            const idx = childPalette.length + 1;
+            childPalette.push(indexes);
+            childIndex.set(key, idx);
+            return idx;
+        };
+
+        const registerName = (name) => {
+            if (!name) return 0;
+            const norm = `${name}`;
+            if (nameIndex.has(norm)) return nameIndex.get(norm);
+            const idx = namePalette.length + 1;
+            namePalette.push(norm);
+            nameIndex.set(norm, idx);
+            return idx;
+        };
+
+        const computeStateValues = (item) => {
+            if (!item || typeof item !== 'object') return null;
+            const kindRaw = item.k ?? item.kind ?? item.type;
+            const type = TYPE_CODE[kindRaw] ?? TYPE_CODE[KIND_ALIASES[kindRaw] ?? kindRaw] ?? 1;
+            const colorIdx = registerColor(item.c ?? item.color);
+            const widthRaw = item.w ?? item.width;
+            const widthDelta = Number.isFinite(+widthRaw) ? Math.round(+widthRaw * 10) - WIDTH_BASE : 0;
+            const rotationRaw = item.r ?? item.rot ?? item.rotation;
+            const rotationVal = Number.isFinite(+rotationRaw) ? Math.round(+rotationRaw * 100) : 0;
+            const hiddenFlag = (item.v === 0 || item.visible === false) ? 1 : 0;
+            const pathIdx = registerPath(item.p ?? item.path);
+            const segmentIdx = registerSegments(item.segments ?? item.g);
+            const fillIdx = registerFill(item.f ?? item.fill);
+            const childIdx = registerChildren(item.children);
+            return {
+                type,
+                color: colorIdx,
+                width: widthDelta,
+                rotation: rotationVal,
+                hidden: hiddenFlag,
+                path: pathIdx,
+                segments: segmentIdx,
+                fill: fillIdx,
+                children: childIdx
+            };
+        };
+
+        const encodeFields = (values, previous, includeDefaults) => {
+            let mask = 0;
+            const data = [];
+            FIELD_ORDER.forEach(key => {
+                const bit = FIELD_MASK[key];
+                const value = values[key] ?? 0;
+                const prev = previous ? (previous[key] ?? FIELD_DEFAULTS[key]) : FIELD_DEFAULTS[key];
+                const defaultVal = FIELD_DEFAULTS[key];
+                const isEssential = FIELD_ALWAYS.has(key);
+                const changed = value !== prev;
+                const shouldInclude = includeDefaults
+                    ? (isEssential ? value !== 0 : value !== defaultVal)
+                    : changed;
+                if (shouldInclude) {
+                    mask |= bit;
+                    data.push(value);
+                }
+            });
+            return { mask, data };
+        };
+
+        const encodeBaseEntry = (values) => {
+            const { mask, data } = encodeFields(values, FIELD_DEFAULTS, true);
+            return [values.type, mask, ...data];
+        };
+
+        const baseElements = Array.isArray(compact.e) ? compact.e : [];
+        baseElements.forEach(item => {
+            const idx = ensureItemIndex(item);
+            if (idx < 0) return;
+            const values = computeStateValues(item);
+            if (!values) return;
+            const entry = encodeBaseEntry(values);
+            ensureArrayIndex(elements, idx);
+            elements[idx] = entry;
+            baseStates.set(idx, cloneStateValues(values));
+        });
+
+        const baseCount = baseElements.length;
+
+        const encodeFrameState = (item, stateMap) => {
+            const idx = ensureItemIndex(item);
+            if (idx < 0) return null;
+            const values = computeStateValues(item);
+            if (!values) return null;
+            const previous = stateMap.get(idx);
+            const includeDefaults = !previous;
+            if (!elements[idx]) {
+                elements[idx] = encodeBaseEntry(values);
+                baseStates.set(idx, cloneStateValues(values));
+            }
+            const baseState = baseStates.get(idx);
+            if (includeDefaults && !baseState) {
+                baseStates.set(idx, cloneStateValues(values));
+            }
+            if (includeDefaults && baseState && statesEqual(baseState, values)) {
+                stateMap.set(idx, values);
+                return idx;
+            }
+            const { mask, data } = encodeFields(values, previous ?? FIELD_DEFAULTS, includeDefaults);
+            stateMap.set(idx, values);
+            if (!mask && !includeDefaults) return null;
+            return [idx, mask, ...data];
+        };
+
+        const encodeRemoved = (removed, stateMap) => {
+            if (!Array.isArray(removed) || !removed.length) return [];
+            const out = [];
+            removed.forEach(entry => {
+                const idx = ensureItemIndex(entry);
+                if (idx >= 0) {
+                    stateMap.delete(idx);
+                    out.push(idx);
+                }
+            });
+            return out;
+        };
+
+        const animations = Array.isArray(compact.a) ? compact.a : [];
+        const encodedAnimations = animations.map(anim => {
+            const nameIdx = registerName(anim.n ?? anim.name);
+            const duration = Number.isFinite(+anim.d) ? Math.round(+anim.d * 1000) : 0;
+            const keyframes = [];
+            const stateMap = new Map();
+            (anim.k || []).forEach(frame => {
+                const time = Number.isFinite(+frame.t) ? Math.round(+frame.t * 1000) : 0;
+                const snapshotList = (frame.s || []).map(item => encodeFrameState(item, stateMap)).filter(Boolean);
+                const updates = (frame.u || []).map(item => encodeFrameState(item, stateMap)).filter(Boolean);
+                const removedList = encodeRemoved(frame.r || [], stateMap);
+                let snapshotPayload = snapshotList;
+                if (snapshotList.length && snapshotList.every(entry => typeof entry === 'number')) {
+                    const packed = encodeIndexSequence(snapshotList);
+                    if (packed) snapshotPayload = packed;
+                }
+                let removedPayload = removedList;
+                if (removedList.length && removedList.every(entry => typeof entry === 'number')) {
+                    const packedRemoved = encodeIndexSequence(removedList);
+                    if (packedRemoved) removedPayload = packedRemoved;
+                }
+                const entry = [time, snapshotPayload];
+                if (updates.length || (Array.isArray(removedPayload) ? removedPayload.length : !!removedPayload)) {
+                    entry.push(updates);
+                    if ((Array.isArray(removedPayload) && removedPayload.length) || (typeof removedPayload === 'string' && removedPayload.length)) {
+                        entry.push(removedPayload);
+                    }
+                }
+                keyframes.push(entry);
+            });
+            return [nameIdx, duration, keyframes];
+        });
+
+        for (let i = 0; i < elements.length; i++) {
+            if (!elements[i]) elements[i] = [0, 0];
+        }
+
+        const elementPayload = encodeElementTable(elements);
+        const animationPayload = encodeAnimationsTable(encodedAnimations);
+        const result = {
+            t: 'LP',
+            v: 3,
+            s: sizeArray.map(num => Number.isFinite(+num) ? +(+num).toFixed(3) : 0),
+            b: baseCount,
+            e: elementPayload || elements,
+            a: animationPayload || encodedAnimations
+        };
+
+        if (colorPalette.length) result.c = colorPalette;
+        if (fillPalette.length) result.f = fillPalette;
+        if (pathPalette.length) result.p = pathPalette;
+        if (segmentPalette.length) result.g = segmentPalette;
+        if (childPalette.length) result.h = childPalette;
+        if (namePalette.length) result.n = namePalette;
+
+        const packed = packUltraPayload(result);
+        if (packed) {
+            return { t: 'LP', v: 4, d: packed };
+        }
+        return result;
+    }
+
+    function convertUltraToLegacy(pack) {
+        if (!pack || typeof pack !== 'object') return null;
+        const sizeArray = Array.isArray(pack.s) ? pack.s : [0, 0];
+        const colors = Array.isArray(pack.c) ? pack.c : [];
+        const fills = Array.isArray(pack.f) ? pack.f : [];
+        const paths = Array.isArray(pack.p) ? pack.p : [];
+        const segments = Array.isArray(pack.g) ? pack.g : [];
+        const childSets = Array.isArray(pack.h) ? pack.h : [];
+        const names = Array.isArray(pack.n) ? pack.n : [];
+        const rawElements = pack.e;
+        const decodedElements = typeof rawElements === 'string' && rawElements.startsWith('@')
+            ? decodeElementTable(rawElements)
+            : null;
+        const elementsRaw = decodedElements || (Array.isArray(rawElements) ? rawElements : []);
+        const baseValueMap = new Map();
+        const baseCount = Number.isFinite(+pack.b) ? Math.max(0, Math.floor(+pack.b)) : elementsRaw.length;
+
+        const idList = elementsRaw.map((entry, idx) => {
+            const arr = Array.isArray(entry) ? entry : [];
+            const typeCode = Number.isFinite(+arr[0]) ? +arr[0] : 1;
+            const prefix = TYPE_FROM_CODE[typeCode] === 'g' ? 'lg' : 'lt';
+            return rndId(prefix);
+        });
+
+        const decodeWidth = (delta) => {
+            const value = Number.isFinite(+delta) ? +delta + WIDTH_BASE : WIDTH_BASE;
+            return value / 10;
+        };
+
+        const decodeRotation = (value) => Number.isFinite(+value) ? +value / 100 : 0;
+
+        const decodeColor = (idx) => {
+            if (!Number.isFinite(+idx) || +idx <= 0) return '#ffffff';
+            return colors[+idx - 1] ?? '#ffffff';
+        };
+
+        const decodeFill = (idx) => {
+            if (!Number.isFinite(+idx) || +idx <= 0) return undefined;
+            return fills[+idx - 1];
+        };
+
+        const decodePath = (idx) => {
+            if (!Number.isFinite(+idx) || +idx <= 0) return undefined;
+            return paths[+idx - 1];
+        };
+
+        const decodeSegments = (idx) => {
+            if (!Number.isFinite(+idx) || +idx <= 0) return undefined;
+            return segments[+idx - 1];
+        };
+
+        const decodeChildren = (idx) => {
+            if (!Number.isFinite(+idx) || +idx <= 0) return [];
+            const source = childSets[+idx - 1];
+            if (!Array.isArray(source)) return [];
+            return source.map(childIdx => {
+                const numeric = Number.isFinite(+childIdx) ? +childIdx : -1;
+                return numeric >= 0 ? idList[numeric] : null;
+            }).filter(Boolean);
+        };
+
+        const decodeEntryValues = (entry) => {
+            const arr = Array.isArray(entry) ? entry : [];
+            const type = Number.isFinite(+arr[0]) ? +arr[0] : 1;
+            const mask = Number.isFinite(+arr[1]) ? +arr[1] : 0;
+            let cursor = 2;
+            const read = (bit) => {
+                if (mask & bit) {
+                    const value = Number.isFinite(+arr[cursor]) ? +arr[cursor] : 0;
+                    cursor += 1;
+                    return value;
+                }
+                return 0;
+            };
+            const values = {
+                color: read(FIELD_MASK.color),
+                width: read(FIELD_MASK.width),
+                rotation: read(FIELD_MASK.rotation),
+                hidden: read(FIELD_MASK.hidden),
+                path: read(FIELD_MASK.path),
+                segments: read(FIELD_MASK.segments),
+                fill: read(FIELD_MASK.fill),
+                children: read(FIELD_MASK.children)
+            };
+            values.type = type;
+            return { type, values };
+        };
+
+        const materializeState = (idx, stateValues) => {
+            const baseEntry = Array.isArray(elementsRaw[idx]) ? elementsRaw[idx] : [];
+            const type = stateValues.type ?? (Number.isFinite(+baseEntry[0]) ? +baseEntry[0] : 1);
+            const obj = {
+                i: idList[idx] || rndId('lt'),
+                k: TYPE_FROM_CODE[type] || 'l',
+                c: decodeColor(stateValues.color),
+                w: +decodeWidth(stateValues.width).toFixed(3)
+            };
+            const rotation = decodeRotation(stateValues.rotation);
+            if (Math.abs(rotation) > EPSILON) obj.r = +rotation.toFixed(3);
+            if (stateValues.hidden) obj.v = 0;
+            const pathStr = decodePath(stateValues.path);
+            if (pathStr !== undefined) obj.p = pathStr;
+            const segStr = decodeSegments(stateValues.segments);
+            if (segStr !== undefined) obj.segments = segStr;
+            const fillValue = decodeFill(stateValues.fill);
+            if (fillValue !== undefined) obj.f = fillValue;
+            const children = decodeChildren(stateValues.children);
+            if (children.length) obj.children = children;
+            return obj;
+        };
+
+        const minimalElements = elementsRaw.map((entry, idx) => {
+            const { values } = decodeEntryValues(entry);
+            const cloned = {
+                type: values.type,
+                color: values.color,
+                width: values.width,
+                rotation: values.rotation,
+                hidden: values.hidden,
+                path: values.path,
+                segments: values.segments,
+                fill: values.fill,
+                children: values.children
+            };
+            baseValueMap.set(idx, cloned);
+            return materializeState(idx, cloned);
+        });
+
+        const decodeStateEntry = (entry, stateMap) => {
+            if (Number.isFinite(entry)) {
+                const idx = +entry;
+                const base = baseValueMap.get(idx) || {
+                    type: Number.isFinite(+((Array.isArray(elementsRaw[idx]) ? elementsRaw[idx][0] : 1))) ? +(Array.isArray(elementsRaw[idx]) ? elementsRaw[idx][0] : 1) : 1,
+                    color: 0,
+                    width: 0,
+                    rotation: 0,
+                    hidden: 0,
+                    path: 0,
+                    segments: 0,
+                    fill: 0,
+                    children: 0
+                };
+                stateMap.set(idx, { ...base });
+                return materializeState(idx, base);
+            }
+            const arr = Array.isArray(entry) ? entry : [];
+            const idx = Number.isFinite(+arr[0]) ? +arr[0] : 0;
+            const mask = Number.isFinite(+arr[1]) ? +arr[1] : 0;
+            let cursor = 2;
+            const prev = stateMap.get(idx) || { ...FIELD_DEFAULTS, type: baseValueMap.get(idx)?.type };
+            const next = { ...prev };
+            FIELD_ORDER.forEach(key => {
+                const bit = FIELD_MASK[key];
+                if (mask & bit) {
+                    const value = Number.isFinite(+arr[cursor]) ? +arr[cursor] : 0;
+                    cursor += 1;
+                    next[key] = value;
+                }
+            });
+            if (next.type === undefined) {
+                next.type = baseValueMap.get(idx)?.type ?? (Number.isFinite(+((Array.isArray(elementsRaw[idx]) ? elementsRaw[idx][0] : 1))) ? +(Array.isArray(elementsRaw[idx]) ? elementsRaw[idx][0] : 1) : 1);
+            }
+            stateMap.set(idx, next);
+            return materializeState(idx, next);
+        };
+
+        const rawAnimations = pack.a;
+        const decodedAnimations = typeof rawAnimations === 'string' && rawAnimations.startsWith('%')
+            ? decodeAnimationsTable(rawAnimations)
+            : null;
+        const legacyAnimations = (decodedAnimations || (Array.isArray(rawAnimations) ? rawAnimations : [])).map(entry => {
+            const arr = Array.isArray(entry) ? entry : [];
+            const nameIdx = Number.isFinite(+arr[0]) ? +arr[0] : 0;
+            const durationVal = Number.isFinite(+arr[1]) ? +arr[1] : 0;
+            const framesRaw = Array.isArray(arr[2]) ? arr[2] : [];
+            const stateMap = new Map();
+            const keyframes = framesRaw.map(frame => {
+                const frameArr = Array.isArray(frame) ? frame : [];
+                const timeVal = Number.isFinite(+frameArr[0]) ? +frameArr[0] : 0;
+                let snapshotRaw = Array.isArray(frameArr[1]) ? frameArr[1] : [];
+                if (typeof frameArr[1] === 'string' && frameArr[1].startsWith(INDEX_MARK)) {
+                    snapshotRaw = decodeIndexSequence(frameArr[1]) || [];
+                }
+                const updatesRaw = Array.isArray(frameArr[2]) ? frameArr[2] : [];
+                let removedRaw = Array.isArray(frameArr[3]) ? frameArr[3] : [];
+                if (typeof frameArr[3] === 'string' && frameArr[3].startsWith(INDEX_MARK)) {
+                    removedRaw = decodeIndexSequence(frameArr[3]) || [];
+                }
+                const snapshot = snapshotRaw.map(item => decodeStateEntry(item, stateMap)).filter(Boolean);
+                const updates = updatesRaw.map(item => decodeStateEntry(item, stateMap)).filter(Boolean);
+                const removed = removedRaw.map(idx => {
+                    const numeric = Number.isFinite(+idx) ? +idx : -1;
+                    if (numeric < 0) return null;
+                    stateMap.delete(numeric);
+                    return idList[numeric] || null;
+                }).filter(Boolean);
+                const frameObj = { t: +(timeVal / 1000).toFixed(3) };
+                if (snapshot.length) frameObj.s = snapshot;
+                if (updates.length) frameObj.u = updates;
+                if (removed.length) frameObj.r = removed;
+                return frameObj;
+            });
+            const name = nameIdx > 0 ? names[nameIdx - 1] : undefined;
+            return {
+                i: rndId('anim'),
+                n: name || 'Animation',
+                d: +(durationVal / 1000).toFixed(3),
+                k: keyframes
+            };
+        });
+
+        return {
+            t: 'LP',
+            v: 2,
+            s: sizeArray.map(num => Number.isFinite(+num) ? +(+num).toFixed(3) : 0),
+            e: minimalElements.slice(0, baseCount),
+            a: legacyAnimations
+        };
+    }
+
     function exportPack(minimal = false) {
         const { w, h } = api.getCSSSize ? api.getCSSSize() : { w: canvas.width, h: canvas.height };
         if (minimal) {
-            const elements = state.items
-                .map(it => serializeItemCompact(it, w, h))
-                .filter(Boolean);
-            const animations = state.animations.map(anim => {
-                const rawFrames = (anim.keyframes || []).map(k => ({
-                    t: Number.isFinite(+k.t) ? +(+k.t).toFixed(3) : 0,
-                    s: (k.snapshot || []).map(it => serializeItemCompact(it, w, h)).filter(Boolean)
-                }));
-                const keyframes = compressCompactKeyframes(rawFrames);
-                return {
-                    i: anim.id,
-                    n: anim.name,
-                    d: Number.isFinite(+anim.duration) ? +(+anim.duration).toFixed(3) : 0,
-                    k: keyframes
-                };
-            });
-            return {
-                t: 'LP',
-                v: 2,
-                s: [Number.isFinite(+w) ? +(+w).toFixed(3) : 0, Number.isFinite(+h) ? +(+h).toFixed(3) : 0],
-                e: elements,
-                a: animations
-            };
+            const compact = buildCompactSnapshot(w, h);
+            return shrinkCompactSnapshot(compact);
         }
 
         const els = state.items
@@ -2230,7 +3783,8 @@ function registerFileSystem(ctx) {
             const p1 = normPoint(it.p1, w, h);
             const p2 = normPoint(it.p2, w, h);
             if (!p1 || !p2) return null;
-            entry.p = [...p1, ...p2];
+            const encoded = encodePointSequence([p1, p2]);
+            entry.p = encoded ?? [...p1, ...p2];
             return entry;
         }
 
@@ -2239,13 +3793,18 @@ function registerFileSystem(ctx) {
             const p2 = normPoint(it.p2, w, h);
             const cp = normPoint(it.cp, w, h);
             if (!p1 || !p2 || !cp) return null;
-            entry.p = [...p1, ...p2, ...cp];
+            const encoded = encodePointSequence([p1, p2, cp]);
+            entry.p = encoded ?? [...p1, ...p2, ...cp];
             return entry;
         }
 
         if (kind === 'shape') {
             const path = Array.isArray(it.path) ? it.path.map(pt => normPoint(pt, w, h)).filter(Boolean) : [];
-            if (path.length) entry.p = path;
+            if (path.length) {
+                const encodedPath = encodePointSequence(path);
+                if (encodedPath) entry.p = encodedPath;
+                else entry.p = path;
+            }
             if (it.fill !== undefined && it.fill !== null) entry.f = it.fill;
             if (Array.isArray(it.children) && it.children.length) entry.children = it.children.slice();
             if (Array.isArray(it.segments) && it.segments.length) {
@@ -2261,7 +3820,10 @@ function registerFileSystem(ctx) {
                     }
                     return out;
                 }).filter(Boolean);
-                if (segments.length) entry.segments = segments;
+                if (segments.length) {
+                    const encodedSegments = encodeSegmentSequence(segments);
+                    entry.segments = encodedSegments ?? segments;
+                }
             }
             return entry;
         }
